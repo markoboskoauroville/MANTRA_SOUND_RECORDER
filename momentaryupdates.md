@@ -28,3 +28,11 @@
 | # | Item | Status |
 |---|---|---|
 | 3 | Always-on-top toggle in the main window | done in v2 |
+
+## 31.10.2026, v3
+
+> Please add auto gain option the same as in my CQ mixer series. The same icon I am going to press and when it detects the right level it's going to adjust the gain automatically and then quits.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | AUTO GAIN on the input, CQ's Gain Assistant icons (knob arc: gear working, ? waiting, ! failed, ✓ done, from CQ MixPad 1.2.2's own "KAuto Gain Steps" graphics), sets the level and stops by itself | in progress |
