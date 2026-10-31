@@ -22,3 +22,9 @@
 |---|---|---|
 | 1 | PERMISSIONS visible only while a permission is missing, in every app (already the rule: MANTRA_MANIFEST swift-apps.md; v1 does it) | check |
 | 2 | Input volume and output volume controls | in progress |
+
+> Also add a toggle button always on top in the main user interface.
+
+| # | Item | Status |
+|---|---|---|
+| 3 | Always-on-top toggle in the main window | in progress |
