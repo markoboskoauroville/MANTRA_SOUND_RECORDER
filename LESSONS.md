@@ -54,3 +54,10 @@ Appended, never rewritten. Newest last.
   the take. The words have a dark band behind them (CAMERA v88: words over a picture need a band).
 - **A build must not throw takes away.** They exist only in memory, so relaunch.swift counts the `take<N>`
   identifiers and leaves a copy with takes running. This is why every control has a fixed identifier.
+
+## 31.10.2026, v6
+
+- **macOS hides overlay scroll bars** until a trackpad scrolls, so "there is more below" was invisible. The window's
+  NSScrollView is set to the legacy style with autohide: drawn whenever the page is taller than the window, gone
+  otherwise. The page measures its own height (a PreferenceKey) and gives the bar its 15 pt, so no SAVE or meter goes
+  under it. `--shot` prints the scroll view's state, because an off-screen picture barely shows the bar.

@@ -83,4 +83,4 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | A visible scroll bar whenever the takes or anything else go below the window | in progress |
+| 1 | A visible scroll bar whenever the takes or anything else go below the window | done in v6: measured, page 779 in a 560 window → bar shown, 15 wide; in a 900 window → hidden |

@@ -1,6 +1,6 @@
 # TAKEOVER: Mantra Sound Recorder (Mantra)
 
-**Version 5** (31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
+**Version 6** (31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
 `/Applications/Mantra Sound Recorder (Mantra).app`, bundle id `community.auroville.mantrasoundrecorder`.
 The reasons behind the choices are in [LESSONS.md](LESSONS.md).
 
@@ -30,6 +30,8 @@ Input row, each with its meter and device menu.
   it then reads SAVED in green (hover: the path). One take plays
   at a time; each keeps its playhead. Below them the next take's empty row (red and growing while recording), then
   the record circle and "take N". Space plays / pauses the last played (or the newest).
+- **Scroll bar**: the page scrolls; while it is taller than the window a real (legacy, always drawn) scroll bar shows
+  at the right and the page narrows by its width, so nothing goes under it (`Scroller`, `ContentHeight`).
 - **Footer**: `v1` (dim, opens the latest release), QUIT (red; quits).
 - **Accessibility**: every word or shape that acts is an Accessibility button with a label and an identifier
   (`quit`, `off`, `top`, `close`, `permissions`, `record`, `autogain`, `take<N>`, `version`); the sliders are adjustable

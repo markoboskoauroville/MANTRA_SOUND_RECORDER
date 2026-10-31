@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 5
+let VERSION = 6
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -39,6 +39,7 @@ func clock(_ s: Double) -> String {
 struct Root: View {
     @ObservedObject var r: Recorder
     @State private var missing = Permissions.missing
+    @State private var contentHeight: CGFloat = 0
     let margin: CGFloat = 14
 
     var body: some View {
@@ -51,10 +52,14 @@ struct Root: View {
                     TakesPanel(r: r)
                     Footer()
                 }
-                .frame(width: max(0, g.size.width - 2 * margin), alignment: .leading)
+                // v6: the page leaves room for the scroll bar while there is one, so nothing goes under it
+                .frame(width: max(0, g.size.width - 2 * margin - (contentHeight > g.size.height + 0.5 ? Scroller.width : 0)),
+                       alignment: .leading)
                 .padding(.horizontal, margin).padding(.bottom, margin)
+                .background(GeometryReader { c in Color.clear.preference(key: ContentHeight.self, value: c.size.height) })
+                .background(Scroller())
             }
-            .scrollIndicators(.automatic)
+            .onPreferenceChange(ContentHeight.self) { contentHeight = $0 }
             .onChange(of: r.takes.count) { withAnimation { sv.scrollTo("next", anchor: .bottom) } }
             .onChange(of: r.recording) { if r.recording { withAnimation { sv.scrollTo("next", anchor: .bottom) } } }
             }
@@ -68,6 +73,27 @@ struct Root: View {
             if m != missing { missing = m; r.permissionsChanged() }
         }
     }
+}
+
+// v6 (Marko, 31.10.2026: "build in a scrolling bar for this application if waveforms or other user interface parts are
+// going out of the user interface"): the window's scroll view gets a real, always-drawn scroll bar (the legacy style,
+// not the overlay one that macOS hides until a trackpad scrolls), shown only while the page is taller than the window.
+struct Scroller: NSViewRepresentable {
+    static let width = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+    func makeNSView(context: Context) -> NSView { let v = NSView(); DispatchQueue.main.async { Self.apply(v) }; return v }
+    func updateNSView(_ v: NSView, context: Context) { DispatchQueue.main.async { Self.apply(v) } }
+    static func apply(_ v: NSView) {
+        guard let s = v.enclosingScrollView else { return }
+        s.hasVerticalScroller = true
+        s.autohidesScrollers = true
+        if s.scrollerStyle != .legacy { s.scrollerStyle = .legacy }
+        s.verticalScroller?.knobStyle = .light
+    }
+}
+
+struct ContentHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 /// ON / OFF, the name, PERMISSIONS while one is missing, ✕ (MANTRA_MANIFEST swift-apps.md)
@@ -572,6 +598,14 @@ enum Main {
         win.contentView = v                                  // never ordered in
         v.layoutSubtreeIfNeeded()
         RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        // v6: the scroll bar, as the scroll view says it is
+        func scrolls(_ x: NSView) -> [NSScrollView] { (x as? NSScrollView).map { [$0] } ?? x.subviews.flatMap(scrolls) }
+        for sc in scrolls(v) {
+            let doc = sc.documentView?.frame.height ?? 0
+            print(String(format: "scroll view: page %.0f in %.0f, style %@, bar %@", doc, sc.contentSize.height,
+                         sc.scrollerStyle == .legacy ? "legacy (always drawn)" : "overlay",
+                         sc.verticalScroller.map { $0.isHidden ? "hidden" : "shown, \(Int($0.frame.width)) wide" } ?? "none"))
+        }
         guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return false }
         v.cacheDisplay(in: v.bounds, to: rep)
         guard let png = rep.representation(using: .png, properties: [:]) else { return false }
