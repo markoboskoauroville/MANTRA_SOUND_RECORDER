@@ -84,3 +84,12 @@
 | # | Item | Status |
 |---|---|---|
 | 1 | A visible scroll bar whenever the takes or anything else go below the window | done in v6: measured, page 779 in a 560 window → bar shown, 15 wide; in a 900 window → hidden |
+
+## 31.10.2026, v7
+
+> In that case keep the on off and remove quit.So on off should be always available but quit you can remove in future apps.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | QUIT removed; ON / OFF stays (OFF quits) | in progress |
+| 2 | The rule for future apps in MANTRA_MANIFEST: ON / OFF always, no QUIT | in progress |
