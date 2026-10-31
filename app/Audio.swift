@@ -66,6 +66,65 @@ enum Devices {
     }
 }
 
+/// v2, THE VOLUME (Marko, 31.10.2026: "I am missing the controlling input and output volume"): the device's own
+/// volume, as SoundSource's sliders move it, so the volume keys and System Settings move the same slider. A device
+/// with no volume of its own (BlackHole's input, some interfaces) gets the app's gain instead.
+final class VolumeWatch {
+    let dev: AudioDeviceID
+    private let scope: AudioObjectPropertyScope
+    private let elements: [UInt32]
+    private var block: AudioObjectPropertyListenerBlock?
+
+    init?(dev: AudioDeviceID, input: Bool, onChange: @escaping (Float) -> Void) {
+        self.dev = dev
+        scope = input ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput
+        var found: [UInt32] = []
+        for e: UInt32 in 0...8 {
+            var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar, mScope: scope, mElement: e)
+            var settable: DarwinBoolean = false
+            if AudioObjectHasProperty(dev, &a), AudioObjectIsPropertySettable(dev, &a, &settable) == noErr, settable.boolValue {
+                found.append(e)
+                if e == 0 { break }                       // the main element is the whole device
+            }
+        }
+        guard !found.isEmpty else { return nil }
+        elements = found
+        let blk: AudioObjectPropertyListenerBlock = { [weak self] _, _ in if let v = self?.value { onChange(v) } }
+        for e in elements {
+            var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar, mScope: scope, mElement: e)
+            AudioObjectAddPropertyListenerBlock(dev, &a, DispatchQueue.main, blk)
+        }
+        block = blk
+    }
+
+    deinit {
+        guard let blk = block else { return }
+        for e in elements {
+            var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar, mScope: scope, mElement: e)
+            AudioObjectRemovePropertyListenerBlock(dev, &a, DispatchQueue.main, blk)
+        }
+    }
+
+    var value: Float {
+        var sum: Float = 0
+        for e in elements {
+            var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar, mScope: scope, mElement: e)
+            var v = Float32(0); var sz = UInt32(4)
+            AudioObjectGetPropertyData(dev, &a, 0, nil, &sz, &v)
+            sum += v
+        }
+        return sum / Float(elements.count)
+    }
+
+    func set(_ v: Float) {
+        for e in elements {
+            var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar, mScope: scope, mElement: e)
+            var x = Float32(v)
+            AudioObjectSetPropertyData(dev, &a, 0, nil, 4, &x)
+        }
+    }
+}
+
 /// Stereo frames from the input's audio thread to the main thread (Spectral Analyzer's ring, as it is).
 final class Ring {
     let cap = 1 << 19
@@ -144,6 +203,18 @@ final class Recorder: ObservableObject {
     private var dL = [Float](repeating: 0, count: 16384), dR = [Float](repeating: 0, count: 16384)
     private var rawInL: Float = 0, rawInR: Float = 0
 
+    // v2: the volumes, 0…1; on the device when it has one, otherwise the app's own gain (inSoft, outSoft)
+    @Published private(set) var inVolume: Float = 1
+    @Published private(set) var outVolume: Float = 1
+    @Published private(set) var inOnDevice = false
+    @Published private(set) var outOnDevice = false
+    private var inWatch: VolumeWatch?, outWatch: VolumeWatch?
+    private var inSoft: Float = 1, outSoft: Float = 1
+    // read by the audio threads: plain flags, not the watch objects
+    private var inWatchless: Bool { !inOnDeviceFlag }
+    private var outWatchless: Bool { !outOnDeviceFlag }
+    private var inOnDeviceFlag = false, outOnDeviceFlag = false
+
     // the output: a copy of the take the audio thread reads, at the output's own rate (linear interpolation)
     private var outDev: AudioDeviceID = 0, outProc: AudioDeviceIOProcID?
     private var pL: UnsafeMutablePointer<Float>?, pR: UnsafeMutablePointer<Float>?
@@ -162,6 +233,9 @@ final class Recorder: ObservableObject {
         let d = UserDefaults.standard
         inUID = pick(d.string(forKey: "input"), inputs, Devices.defaultDevice(input: true))
         outUID = pick(d.string(forKey: "output"), outputs, Devices.defaultDevice(input: false))
+        if d.object(forKey: "inGain") != nil { inSoft = d.float(forKey: "inGain") }
+        if d.object(forKey: "outGain") != nil { outSoft = d.float(forKey: "outGain") }
+        watchVolumes()
         timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(timer!, forMode: .common)
         guard live else { return }
@@ -191,6 +265,33 @@ final class Recorder: ObservableObject {
         let o = pick(outUID, outputs, Devices.defaultDevice(input: false))
         if i != inUID { if recording { stopRecording() }; inUID = i; startInput() }
         if o != outUID { stopPlaying(); outUID = o }
+        watchVolumes()
+    }
+
+    // ---------------------------------------------------------------- the volumes
+    private func watchVolumes() {
+        let i = inputs.first { $0.uid == inUID }, o = outputs.first { $0.uid == outUID }
+        if inWatch?.dev != i?.id || (inWatch == nil && i != nil) {
+            inWatch = i.flatMap { VolumeWatch(dev: $0.id, input: true) { [weak self] v in self?.inVolume = v } }
+        }
+        if outWatch?.dev != o?.id || (outWatch == nil && o != nil) {
+            outWatch = o.flatMap { VolumeWatch(dev: $0.id, input: false) { [weak self] v in self?.outVolume = v } }
+        }
+        inOnDevice = inWatch != nil; outOnDevice = outWatch != nil
+        inOnDeviceFlag = inOnDevice; outOnDeviceFlag = outOnDevice
+        inVolume = inWatch?.value ?? inSoft
+        outVolume = outWatch?.value ?? outSoft
+    }
+
+    func setVolume(input: Bool, _ v: Float) {
+        let v = min(max(v, 0), 1)
+        if input {
+            if let w = inWatch { w.set(v) } else { inSoft = v; if live { UserDefaults.standard.set(v, forKey: "inGain") } }
+            inVolume = v
+        } else {
+            if let w = outWatch { w.set(v) } else { outSoft = v; if live { UserDefaults.standard.set(v, forKey: "outGain") } }
+            outVolume = v
+        }
     }
 
     // ---------------------------------------------------------------- choosing
@@ -198,6 +299,7 @@ final class Recorder: ObservableObject {
         guard uid != inUID, !recording else { return }
         inUID = uid
         if live { UserDefaults.standard.set(uid, forKey: "input") }
+        watchVolumes()
         startInput()
     }
 
@@ -207,6 +309,7 @@ final class Recorder: ObservableObject {
         stopPlaying()
         outUID = uid
         if live { UserDefaults.standard.set(uid, forKey: "output") }   // a test never changes his choice
+        watchVolumes()
         if was { play() }
     }
 
@@ -247,6 +350,8 @@ final class Recorder: ObservableObject {
                     } else {
                         for i in 0..<n { l[i] = d0[i]; r[i] = d0[i] }     // a mono microphone: the same on both sides
                     }
+                    let g = self.inWatchless ? self.inSoft : 1
+                    if g != 1 { for i in 0..<n { l[i] *= g; r[i] *= g } }
                     for i in 0..<n { pl = max(pl, abs(l[i])); pr = max(pr, abs(r[i])) }
                     self.ring.write(l.baseAddress!, r.baseAddress!, n)
                 }
@@ -336,6 +441,7 @@ final class Recorder: ObservableObject {
             var pos = self.pPos
             let step = self.pStep, N = self.pN
             var pl: Float = 0, pr: Float = 0
+            let g = self.outWatchless ? self.outSoft : 1
             for i in 0..<n {
                 var l: Float = 0, r: Float = 0
                 let k = Int(pos)
@@ -343,6 +449,7 @@ final class Recorder: ObservableObject {
                     let f = Float(pos - Double(k))
                     l = L[k] + (L[k + 1] - L[k]) * f; r = R[k] + (R[k + 1] - R[k]) * f
                     pos += step
+                    l *= g; r *= g
                 } else { self.pDone = true }
                 pl = max(pl, abs(l)); pr = max(pr, abs(r))
                 if ch >= 2 {

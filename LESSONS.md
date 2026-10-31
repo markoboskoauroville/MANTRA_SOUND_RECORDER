@@ -17,3 +17,11 @@ Appended, never rewritten. Newest last.
 - **Min height 500.** At 480 the footer (v1 / QUIT) fell under the window edge in the off-screen picture.
 - **SoundSource's look vs CAMERA.** Marko asked for SoundSource's look, so panels and boxes stay; from CAMERA come
   the colour roles, the record circle, ON/OFF, QUIT and PERMISSIONS.
+
+## 31.10.2026, v2
+
+- **The device's own volume, not a gain in the app.** SoundSource's sliders move the device, so the volume keys and
+  his other apps agree with this one. Measured: the ADAM D3V has no main element, only channels 1 and 2; External
+  Microphone, BlackHole and MacBook Pro Microphone have element 0. A device with none falls back to the app's gain.
+- **The audio threads read plain Bools and Floats**, never the VolumeWatch objects that the main thread replaces.
+- **ON TOP** on the first row, a CAMERA toggle word (green on, grey off), `NSWindow.level = .floating`.

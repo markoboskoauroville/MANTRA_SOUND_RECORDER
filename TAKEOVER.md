@@ -1,6 +1,6 @@
 # TAKEOVER: Mantra Sound Recorder (Mantra)
 
-**Version 1** (31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
+**Version 2** (31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
 `/Applications/Mantra Sound Recorder (Mantra).app`, bundle id `community.auroville.mantrasoundrecorder`.
 The reasons behind the choices are in [LESSONS.md](LESSONS.md).
 
@@ -13,9 +13,9 @@ Input row, each with its meter and device menu.
 ## The window, top to bottom
 
 - **First row** (in the hidden title bar, beside the traffic lights): ON (green) / OFF (grey; quits), the name
-  centred, PERMISSIONS (amber, only while the microphone is not allowed; a click asks once, then opens the
+  centred, ON TOP (green: the window floats above every other window; kept in UserDefaults `onTop`), PERMISSIONS (amber, only while the microphone is not allowed; a click asks once, then opens the
   Microphone page of System Settings), ✕ (closes the window, the app stays on).
-- **Devices**: Output and Input rows: icon, name, a stereo meter (L over R, -60…0 dBFS, green to -12, amber to -3,
+- **Devices**: Output and Input rows: icon, name, a volume slider (SoundSource's: green track, white knob) with its % over a stereo meter (L over R, -60…0 dBFS, green to -12, amber to -3,
   red above, white tick = peak held 1.5 s, the bar falls 24 dB/s), the held peak in dB, the device menu. The input
   menu is locked while recording. Choices are kept in UserDefaults by device UID; a vanished device falls back to
   the Mac's default. An amber line under the rows shows a device error.
@@ -34,6 +34,10 @@ Input row, each with its meter and device menu.
   into the take (`takeL`, `takeR`) while recording, and makes the waveform: the loudest sample of every 256 frames.
 - The **output** IOProc runs only while playing. It reads a copy of the take at the output device's own rate (step
   = take rate / output rate, linear interpolation), so the device's rate is never changed.
+- **Volume**: `VolumeWatch` moves the device's own volume (kAudioDevicePropertyVolumeScalar, element 0, or each
+  channel element as on the ADAM: 1 and 2) and listens to it, so the volume keys and System Settings move the slider.
+  A device without a settable volume gets the app's own gain (`inSoft` / `outSoft`, UserDefaults `inGain` / `outGain`),
+  applied in the IOProcs.
 - **Deleting**: the take is never written to disk. QUIT, OFF and ⌘Q call `forget()` (devices released, arrays
   emptied); a crash leaves nothing either. Closing the window keeps the app ON and the take with it (swift-apps.md).
 
@@ -69,5 +73,6 @@ whose name contains the word and never changes the saved choice. Test audio goes
   ring drain and the live red waveform have not run with a real signal.
 - Playback into BlackHole 2ch was measured (31.10.2026): 3.05 s of 440 Hz arrived; the level was ~17 dB under the
   take because BlackHole's own volume slider attenuates (seen before in Spectral Analyzer).
+- v2 volume sliders not yet moved by a hand; the ADAM read back 88 % as SoundSource shows.
 - Not tried: device unplugged during recording or playing, devices with more than two channels, a take of more
   than a few minutes (memory: about 23 MB a minute).

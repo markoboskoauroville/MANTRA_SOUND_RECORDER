@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 1
+let VERSION = 2
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -57,7 +57,7 @@ struct Root: View {
         }
         .ignoresSafeArea(.container, edges: .top)          // the top row sits in the hidden title bar, beside the traffic lights
         .background(Ink.ground)
-        .frame(minWidth: 580, idealWidth: 720, maxWidth: .infinity, minHeight: 500, idealHeight: 520, maxHeight: .infinity)
+        .frame(minWidth: 580, idealWidth: 720, maxWidth: .infinity, minHeight: 520, idealHeight: 540, maxHeight: .infinity)
         .environment(\.colorScheme, .dark)
         .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
             let m = Permissions.missing
@@ -69,6 +69,8 @@ struct Root: View {
 /// ON / OFF, the name, PERMISSIONS while one is missing, ✕ (MANTRA_MANIFEST swift-apps.md)
 struct TopRow: View {
     let missing: [String]
+    // v2 (Marko, 31.10.2026: "add a toggle button always on top in the main user interface"): green = above every window
+    @AppStorage("onTop") private var onTop = false
     var body: some View {
         ZStack {
             (Text("Mantra Sound").fontWeight(.bold) + Text(" Recorder").fontWeight(.regular))
@@ -79,6 +81,9 @@ struct TopRow: View {
                 Text("OFF").foregroundStyle(Ink.grey)
                     .contentShape(Rectangle()).onTapGesture { NSApp.terminate(nil) }
                 Spacer()
+                Text("ON TOP").foregroundStyle(onTop ? Ink.green : Ink.grey)
+                    .contentShape(Rectangle()).onTapGesture { onTop.toggle(); TopRow.float(onTop) }
+                    .help("Always on top: green, the window stays above every other window")
                 if !missing.isEmpty {
                     Text("PERMISSIONS").foregroundStyle(Ink.amber)
                         .contentShape(Rectangle()).onTapGesture { Permissions.openMissing() }
@@ -91,6 +96,13 @@ struct TopRow: View {
             .font(.system(size: 12, weight: .bold, design: .monospaced))
         }
         .frame(height: 30)
+        .onAppear { DispatchQueue.main.async { TopRow.float(onTop) } }
+    }
+
+    static func float(_ on: Bool) {
+        for w in NSApp.windows where w.contentView is NSHostingView<Root> || w.title.hasPrefix("Mantra Sound Recorder") {
+            w.level = on ? .floating : .normal
+        }
     }
 }
 
@@ -123,8 +135,10 @@ struct DevicesPanel: View {
             Text("Device").frame(width: 230)
         }.font(.system(size: 11)).foregroundStyle(Ink.dim).padding(.leading, 160))) {
             DeviceRow(icon: "speaker.wave.2.fill", name: "Output", meter: r.outMeter,
+                      volume: r.outVolume, onDevice: r.outOnDevice, setVolume: { r.setVolume(input: false, $0) },
                       devices: r.outputs, uid: r.outUID, enabled: true, fill: Ink.rowGrey) { r.chooseOutput($0) }
             DeviceRow(icon: "mic.fill", name: "Input", meter: r.inMeter,
+                      volume: r.inVolume, onDevice: r.inOnDevice, setVolume: { r.setVolume(input: true, $0) },
                       devices: r.inputs, uid: r.inUID, enabled: !r.recording, fill: Ink.rowGreen) { r.chooseInput($0) }
             if let e = r.error {
                 Text(e).font(.system(size: 11)).foregroundStyle(Ink.amber)
@@ -138,6 +152,9 @@ struct DevicesPanel: View {
 struct DeviceRow: View {
     let icon: String, name: String
     let meter: Meter
+    let volume: Float
+    let onDevice: Bool
+    let setVolume: (Float) -> Void
     let devices: [Device]
     let uid: String
     let enabled: Bool
@@ -149,22 +166,51 @@ struct DeviceRow: View {
             Image(systemName: icon).font(.system(size: 13)).foregroundStyle(Ink.text)
                 .frame(width: 28, height: 28).background(RoundedRectangle(cornerRadius: 7).fill(Ink.tile))
             Text(name).font(.system(size: 14)).foregroundStyle(Ink.text).frame(width: 62, alignment: .leading)
-            MeterView(m: meter).frame(minWidth: 110).frame(height: 18)
-            Text(readout).font(.system(size: 11, design: .monospaced)).foregroundStyle(Ink.text)
-                .frame(width: 58, alignment: .trailing)
+            VStack(spacing: 6) {
+                VolumeSlider(value: volume, set: setVolume).frame(height: 16)
+                    .help(onDevice ? "The device's own volume (the volume keys move it too)" : "This device has no volume of its own: the app's gain")
+                MeterView(m: meter).frame(height: 11)
+            }
+            .frame(minWidth: 110)
+            VStack(alignment: .trailing, spacing: 5) {
+                Text("\(Int((volume * 100).rounded())) %").font(.system(size: 12, weight: .semibold, design: .monospaced))
+                Text(readout).font(.system(size: 10, design: .monospaced)).foregroundStyle(Ink.dim)
+            }
+            .foregroundStyle(Ink.text).frame(width: 64, alignment: .trailing)
             Picker("", selection: Binding(get: { uid }, set: { choose($0) })) {
                 ForEach(devices) { d in Text(d.name).tag(d.uid) }
             }
             .labelsHidden().pickerStyle(.menu).disabled(!enabled)
             .frame(minWidth: 150, maxWidth: 230)
         }
-        .padding(.horizontal, 14).frame(height: 46)
+        .padding(.horizontal, 14).frame(height: 56)
         .background(fill)
     }
 
     var readout: String {
         let p = max(meter.holdL, meter.holdR)
         return p <= -60 ? "−∞ dB" : String(format: "%.1f dB", p)
+    }
+}
+
+/// SoundSource's slider: a green track up to the value, a white knob; a click or drag sets it.
+struct VolumeSlider: View {
+    let value: Float
+    let set: (Float) -> Void
+    var body: some View {
+        GeometryReader { g in
+            let knobW: CGFloat = 20, w = max(1, g.size.width - knobW)
+            let x = w * CGFloat(min(max(value, 0), 1))
+            ZStack(alignment: .leading) {
+                Capsule().fill(Ink.well).frame(height: 5).padding(.horizontal, knobW / 2)
+                Capsule().fill(Ink.green).frame(width: x + knobW / 2, height: 5)
+                RoundedRectangle(cornerRadius: 5).fill(Color.white).frame(width: knobW, height: 14)
+                    .shadow(color: .black.opacity(0.4), radius: 1, y: 1).offset(x: x)
+            }
+            .frame(height: g.size.height)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { v in set(Float((v.location.x - knobW / 2) / w)) })
+        }
     }
 }
 
@@ -356,7 +402,7 @@ struct RecorderApp: App {
         WindowGroup("Mantra Sound Recorder (Mantra)") { Root(r: REC) }
             .windowStyle(.hiddenTitleBar)
             .windowResizability(.contentMinSize)
-            .defaultSize(width: 720, height: 520)
+            .defaultSize(width: 720, height: 540)
             .commands { CommandGroup(replacing: .newItem) {} }
     }
 }
