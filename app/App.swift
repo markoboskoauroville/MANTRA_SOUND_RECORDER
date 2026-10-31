@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 4
+let VERSION = 5
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -324,9 +324,28 @@ struct TakeRow: View {
                         if NSEvent.modifierFlags.contains(.command) { r.jump(t, Double(v.location.x / max(1, g.size.width))) }
                         else { r.toggle(t) }
                     })
+                    .overlay(alignment: .topTrailing) { SaveKey(r: r, t: t).padding(6) }
             }
             .frame(height: 74)
         }
+    }
+}
+
+/// SAVE in the waveform's upper right corner (v5); SAVED in green once written, the file's name on hover; again saves again
+struct SaveKey: View {
+    @ObservedObject var r: Recorder
+    let t: Take
+    var body: some View {
+        let saved = t.savedTo != nil
+        Text(saved ? "SAVED" : "SAVE")
+            .font(.system(size: 11, weight: .bold, design: .monospaced))
+            .foregroundStyle(saved ? Ink.green : Ink.text)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 5).fill(Color.black.opacity(0.55)))
+            .contentShape(Rectangle())
+            .onTapGesture { r.save(t) }
+            .axButton("Save take \(t.id)", id: "save\(t.id)", value: t.savedTo?.lastPathComponent) { r.save(t) }
+            .help(t.savedTo.map { "Saved as " + $0.path } ?? "Save take \(t.id) as a WAV file")
     }
 }
 
@@ -524,6 +543,12 @@ enum Main {
         if let i = a.firstIndex(of: "--play-test"), i + 1 < a.count {
             // the test take played to an output whose name contains the word: --play-test BlackHole
             exit(playTest(a[i + 1]) ? 0 : 1)
+        }
+        if let i = a.firstIndex(of: "--save-test"), i + 1 < a.count {
+            // the WAV writer on a 3 s test take: --save-test <file.wav>
+            let r = Recorder(live: false)
+            do { try Recorder.writeWAV(r.addTestTake(seconds: 3), to: URL(fileURLWithPath: a[i + 1])); exit(0) }
+            catch { print(error); exit(1) }
         }
         if let i = a.firstIndex(of: "--gain-test"), i + 1 < a.count {
             // the auto gain on an input whose name contains the word, its volume put back afterwards: --gain-test BlackHole

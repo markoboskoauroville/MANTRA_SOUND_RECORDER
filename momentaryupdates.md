@@ -66,4 +66,13 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | SAVE in the upper right corner of each take's waveform | in progress |
+| 1 | SAVE in the upper right corner of each take's waveform | done in v5: a save dialog (last folder, at first ~/Music), WAV stereo 24 bit; SAVED in green after; measured with --save-test |
+
+> In all future apps by default built in accessibility services.
+
+> This is something for Mantra Manifest.
+
+| # | Item | Status |
+|---|---|---|
+| 2 | Accessibility built into every future app, written in MANTRA_MANIFEST | done: modules/swift-apps.md, "Accessibility built in, and the build quits and reopens the app" |
+| 3 | A build never quits a copy that holds takes (they are only in memory) | done in v5, not yet seen with takes |

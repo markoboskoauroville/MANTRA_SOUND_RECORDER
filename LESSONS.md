@@ -47,3 +47,10 @@ Appended, never rewritten. Newest last.
   AXPress came back as an error and the script reported "no QUIT". Now QUIT terminates on the next turn of the main
   loop, and relaunch.swift judges by the app being gone, not by the press's answer.
 - **The menu's Quit is the fallback**, for a copy without the button (v3 and older) or with no window open.
+
+## 31.10.2026, v5
+
+- **SAVE sits over the waveform** as an overlay after the waveform's gesture, so its click is its own and never plays
+  the take. The words have a dark band behind them (CAMERA v88: words over a picture need a band).
+- **A build must not throw takes away.** They exist only in memory, so relaunch.swift counts the `take<N>`
+  identifiers and leaves a copy with takes running. This is why every control has a fixed identifier.

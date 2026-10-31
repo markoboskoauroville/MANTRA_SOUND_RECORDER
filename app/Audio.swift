@@ -208,6 +208,9 @@ final class Take: Identifiable {
     var l: [Float] = [], r: [Float] = []
     var peaks: [Float] = []
     var cursor: Double = 0
+    /// v5: where SAVE last wrote it
+    var savedTo: URL?
+    let made = Date()
     init(id: Int, rate: Double) { self.id = id; self.rate = rate }
     var frames: Int { l.count }
     var seconds: Double { Double(frames) / rate }
@@ -559,6 +562,48 @@ final class Recorder: ObservableObject {
 
     private func freePlayback() {
         pL?.deallocate(); pR?.deallocate(); pL = nil; pR = nil; pN = 0
+    }
+
+    // ---------------------------------------------------------------- saving
+    // v5 (Marko, 31.10.2026: "add the save button in upper right corner of each waveform"): SAVE asks where (the last
+    // folder, at first ~/Music) and writes the take as it is: WAV, stereo, 24 bit, at the take's rate.
+    func save(_ t: Take) {
+        let panel = NSSavePanel()
+        panel.title = "Save take \(t.id)"
+        panel.allowedContentTypes = [.wav]
+        let f = DateFormatter(); f.dateFormat = "d.M.yyyy HH.mm"
+        panel.nameFieldStringValue = "Take \(t.id) - \(f.string(from: t.made)).wav"
+        let d = UserDefaults.standard
+        panel.directoryURL = URL(fileURLWithPath: d.string(forKey: "saveFolder") ?? (NSHomeDirectory() + "/Music"))
+        let done: (NSApplication.ModalResponse) -> Void = { [weak self] resp in
+            guard resp == .OK, let url = panel.url, let self = self else { return }
+            do {
+                try Self.writeWAV(t, to: url)
+                t.savedTo = url
+                d.set(url.deletingLastPathComponent().path, forKey: "saveFolder")
+                self.error = nil
+            } catch { self.error = "take \(t.id) was not saved: \(error.localizedDescription)" }
+            self.objectWillChange.send()
+        }
+        if let w = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible }) { panel.beginSheetModal(for: w, completionHandler: done) }
+        else { done(panel.runModal()) }
+    }
+
+    static func writeWAV(_ t: Take, to url: URL) throws {
+        let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: t.rate, AVNumberOfChannelsKey: 2,
+                                       AVLinearPCMBitDepthKey: 24, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false]
+        let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        let chunk = 65536
+        guard let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(chunk)) else { return }
+        var at = 0
+        while at < t.frames {
+            let n = min(chunk, t.frames - at)
+            t.l.withUnsafeBufferPointer { buf.floatChannelData![0].update(from: $0.baseAddress! + at, count: n) }
+            t.r.withUnsafeBufferPointer { buf.floatChannelData![1].update(from: $0.baseAddress! + at, count: n) }
+            buf.frameLength = AVAudioFrameCount(n)
+            try file.write(from: buf)
+            at += n
+        }
     }
 
     // ---------------------------------------------------------------- auto gain

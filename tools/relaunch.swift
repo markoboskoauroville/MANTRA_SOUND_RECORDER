@@ -7,7 +7,7 @@ import AppKit
 import ApplicationServices
 
 let args = CommandLine.arguments
-guard args.count == 3 else { print("usage: relaunch.swift <bundle id> <app path>"); exit(2) }
+guard args.count >= 3 else { print("usage: relaunch.swift <bundle id> <app path>"); exit(2) }
 let bundle = args[1], path = args[2]
 
 func attr(_ e: AXUIElement, _ name: String) -> AnyObject? {
@@ -27,6 +27,18 @@ if !running.isEmpty {
     guard AXIsProcessTrusted() else { print("relaunch: no Accessibility for this terminal, the old copy is still running"); exit(1) }
     for app in running {
         let ax = AXUIElementCreateApplication(app.processIdentifier)
+        // v5: a copy holding takes is not quit: they live only in memory and a build would throw them away
+        let wins = (attr(ax, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+        var takes = 0
+        func count(_ e: AXUIElement, _ d: Int) {
+            if let id = attr(e, "AXIdentifier") as? String, id.hasPrefix("take") { takes += 1 }
+            if d < 30 { for c in children(e) { count(c, d + 1) } }
+        }
+        for w in wins { count(w, 0) }
+        if takes > 0 && !args.contains("--force") {
+            print("relaunch: pid \(app.processIdentifier) holds \(takes) take(s), not quit; the new version opens at its next start")
+            exit(3)
+        }
         // the press is judged by the app going, not by the press's answer: an app that quits inside the action never
         // answers it (v4's first run: the QUIT worked and AXPress still came back as an error)
         func gone(_ secs: Double) -> Bool {

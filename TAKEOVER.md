@@ -1,6 +1,6 @@
 # TAKEOVER: Mantra Sound Recorder (Mantra)
 
-**Version 4** (31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
+**Version 5** (31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
 `/Applications/Mantra Sound Recorder (Mantra).app`, bundle id `community.auroville.mantrasoundrecorder`.
 The reasons behind the choices are in [LESSONS.md](LESSONS.md).
 
@@ -25,7 +25,9 @@ Input row, each with its meter and device menu.
   (up to 8 rounds); then a green ✓ for 4 s and it is off. ! and an amber line when it fails. A line under the rows
   says what it is doing.
 - **Takes**: every recording of the session is its own waveform, numbered, oldest on top, with `position / length`.
-  **A click on a waveform plays / pauses it** (there is no play key); **⌘-click jumps there and plays**. One take plays
+  **A click on a waveform plays / pauses it** (there is no play key); **⌘-click jumps there and plays**. **SAVE** in each waveform's upper right corner opens a save dialog (the last
+  folder, at first ~/Music; name "Take N - d.M.yyyy HH.mm.wav") and writes WAV, stereo, 24 bit, at the take's rate;
+  it then reads SAVED in green (hover: the path). One take plays
   at a time; each keeps its playhead. Below them the next take's empty row (red and growing while recording), then
   the record circle and "take N". Space plays / pauses the last played (or the newest).
 - **Footer**: `v1` (dim, opens the latest release), QUIT (red; quits).
@@ -66,8 +68,8 @@ Input row, each with its meter and device menu.
 ./build.sh
 ```
 
-Every build quits the running copy through Accessibility and opens the new one (Marko, 31.10.2026); the takes in
-the old copy are gone with it. `./build.sh --no-run` only builds.
+Every build quits the running copy through Accessibility and opens the new one (Marko, 31.10.2026), unless that
+copy holds takes: then it is left running and says so (exit 3). `./build.sh --no-run` only builds.
 
 ```sh
 "build/Mantra Sound Recorder (Mantra).app/Contents/MacOS/MantraSoundRecorder" --shot docs/window.png 720 520
@@ -81,7 +83,7 @@ the old copy are gone with it. `./build.sh --no-run` only builds.
 "build/Mantra Sound Recorder (Mantra).app/Contents/MacOS/MantraSoundRecorder" --gain-test BlackHole
 ```
 
-`--gain-test` runs the auto gain on that input (play a tone into it with sox first) and puts its volume back.
+`--save-test <file.wav>` writes a 3 s test take through the SAVE writer. `--gain-test` runs the auto gain on that input (play a tone into it with sox first) and puts its volume back.
 
 `--shot` draws the window off screen with a test take; `--play-test <name>` plays a 3 s 440 Hz test take to the output
 whose name contains the word and never changes the saved choice. Test audio goes to BlackHole, never the ADAM.
@@ -92,6 +94,8 @@ whose name contains the word and never changes the saved choice. Test audio goes
   ring drain and the live red waveform have not run with a real signal.
 - Playback into BlackHole 2ch was measured (31.10.2026): 3.05 s of 440 Hz arrived; the level was ~17 dB under the
   take because BlackHole's own volume slider attenuates (seen before in Spectral Analyzer).
+- SAVE's dialog not yet used by a hand (the writer was measured: 2 ch, 48 kHz, 24 bit, 3.00 s). The relaunch's
+  "holds takes, not quit" path has not yet met a copy with takes.
 - Auto gain measured on BlackHole only (31.10.2026: -21.9 → -12.0 dB in one round); not yet on a voice, where the
   2 s window may need to be longer.
 - v2 volume sliders not yet moved by a hand; the ADAM read back 88 % as SoundSource shows.
