@@ -6,10 +6,10 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Swift app "Mantra Sound Recorder (Mantra)", signed Mantra Apps, in /Applications | in progress |
-| 2 | Record button, play button | in progress |
-| 3 | Waveform shown while playing | in progress |
-| 4 | Audio deleted when the app closes | in progress |
-| 5 | Input and output drop-down menus | in progress |
-| 6 | Input and output VU meters | in progress |
-| 7 | The look of SoundSource (as open on screen 31.10.2026) | in progress |
+| 1 | Swift app "Mantra Sound Recorder (Mantra)", signed Mantra Apps, in /Applications | done in v1, waiting for Marko's test |
+| 2 | Record button, play button | done in v1, waiting for Marko's test |
+| 3 | Waveform shown while playing | done in v1, waiting for Marko's test |
+| 4 | Audio deleted when the app closes | done in v1, waiting for Marko's test |
+| 5 | Input and output drop-down menus | done in v1, waiting for Marko's test |
+| 6 | Input and output VU meters | done in v1, waiting for Marko's test |
+| 7 | The look of SoundSource (as open on screen 31.10.2026) | done in v1, waiting for Marko's test |
