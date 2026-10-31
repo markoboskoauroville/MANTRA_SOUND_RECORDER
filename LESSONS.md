@@ -61,3 +61,8 @@ Appended, never rewritten. Newest last.
   NSScrollView is set to the legacy style with autohide: drawn whenever the page is taller than the window, gone
   otherwise. The page measures its own height (a PreferenceKey) and gives the bar its 15 pt, so no SAVE or meter goes
   under it. `--shot` prints the scroll view's state, because an off-screen picture barely shows the bar.
+
+## 31.10.2026, v7
+
+- **OFF and QUIT did the same thing here**, and Marko chose OFF: QUIT is gone from this app and from the manifest's
+  rule for new apps (swift-apps.md, "No QUIT"). The relaunch presses `off`, then `quit` for older copies, then the menu.

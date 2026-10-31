@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 6
+let VERSION = 7
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -492,7 +492,8 @@ struct AutoGainKey: View {
     }
 }
 
-/// vN, plain and dim, a hidden link to the latest build (version-visible.md); QUIT, red, bottom right (swift-apps.md)
+/// vN, plain and dim, a hidden link to the latest build (version-visible.md). v7: no QUIT (Marko, 31.10.2026: "keep the
+/// on off and remove quit"); OFF on the first row quits.
 struct Footer: View {
     var body: some View {
         HStack {
@@ -500,16 +501,13 @@ struct Footer: View {
                 .onTapGesture { NSWorkspace.shared.open(RELEASES) }
                 .axButton("Version \(VERSION)", id: "version") { NSWorkspace.shared.open(RELEASES) }
             Spacer()
-            Text("QUIT").font(.system(size: 12, weight: .bold, design: .monospaced)).foregroundStyle(Ink.red)
-                .contentShape(Rectangle()).onTapGesture { NSApp.terminate(nil) }
-                .axButton("Quit", id: "quit") { DispatchQueue.main.async { NSApp.terminate(nil) } }   // answer the press, then quit
         }
     }
 }
 
 // v4 (Marko, 31.10.2026: "Make this application accessibility compatible and close it through accessibility"): every
 // word that acts is an Accessibility button with a label and an identifier, so AXPress works on it (tools/relaunch.swift
-// presses "quit"); a tap gesture alone is invisible to Accessibility.
+// presses "off"); a tap gesture alone is invisible to Accessibility.
 extension View {
     func axButton(_ label: String, id: String, value: String? = nil, _ action: @escaping () -> Void) -> some View {
         accessibilityElement(children: .ignore)

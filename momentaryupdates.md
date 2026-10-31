@@ -91,5 +91,5 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | QUIT removed; ON / OFF stays (OFF quits) | in progress |
-| 2 | The rule for future apps in MANTRA_MANIFEST: ON / OFF always, no QUIT | in progress |
+| 1 | QUIT removed; ON / OFF stays (OFF quits) | done in v7; a build now presses OFF (measured: quit through its OFF, reopened) |
+| 2 | The rule for future apps in MANTRA_MANIFEST: ON / OFF always, no QUIT | done: swift-apps.md "No QUIT: ON / OFF is the way out" |

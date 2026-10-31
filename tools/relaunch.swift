@@ -1,6 +1,6 @@
 // After a build: the running copy is quit through Accessibility (Marko, 31.10.2026: "when you make new version close
 // this one which is running and run the new one ... close it through accessibility"), then the new one is opened.
-// First the window's QUIT button (AXIdentifier "quit", v4 on); a copy without it (v3 and older, or no window open) is
+// First the window's OFF (AXIdentifier "off"; "quit" in v4–v6, which had a QUIT); a copy without it (v3 and older, or no window open) is
 // quit by its own menu: the app menu's "Quit …" item. Never killed: if it does not go, the script says so and stops.
 // Usage: swift tools/relaunch.swift <bundle id> <app path>
 import AppKit
@@ -48,9 +48,9 @@ if !running.isEmpty {
         }
         var how = ""
         let windows = (attr(ax, kAXWindowsAttribute) as? [AXUIElement]) ?? []
-        if let quit = windows.lazy.compactMap({ w in find(w) { (attr($0, "AXIdentifier") as? String) == "quit" } }).first {
+        if let quit = windows.lazy.compactMap({ w in find(w) { ["off", "quit"].contains(attr($0, "AXIdentifier") as? String ?? "") } }).first {
             _ = AXUIElementPerformAction(quit, kAXPressAction as CFString)
-            if gone(4) { how = "its QUIT button" }
+            if gone(4) { how = "its OFF" }
         }
         if how.isEmpty, let bar = attr(ax, kAXMenuBarAttribute), CFGetTypeID(bar) == AXUIElementGetTypeID(),
            let appMenu = children(bar as! AXUIElement).dropFirst().first,

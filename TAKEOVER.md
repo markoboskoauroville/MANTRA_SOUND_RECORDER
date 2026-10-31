@@ -1,6 +1,6 @@
 # TAKEOVER: Mantra Sound Recorder (Mantra)
 
-**Version 6** (31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
+**Version 7** (31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
 `/Applications/Mantra Sound Recorder (Mantra).app`, bundle id `community.auroville.mantrasoundrecorder`.
 The reasons behind the choices are in [LESSONS.md](LESSONS.md).
 
@@ -32,9 +32,9 @@ Input row, each with its meter and device menu.
   the record circle and "take N". Space plays / pauses the last played (or the newest).
 - **Scroll bar**: the page scrolls; while it is taller than the window a real (legacy, always drawn) scroll bar shows
   at the right and the page narrows by its width, so nothing goes under it (`Scroller`, `ContentHeight`).
-- **Footer**: `v1` (dim, opens the latest release), QUIT (red; quits).
+- **Footer**: `vN` (dim, opens the latest release). No QUIT since v7: OFF on the first row quits.
 - **Accessibility**: every word or shape that acts is an Accessibility button with a label and an identifier
-  (`quit`, `off`, `top`, `close`, `permissions`, `record`, `autogain`, `take<N>`, `version`); the sliders are adjustable
+  (`off`, `top`, `close`, `permissions`, `record`, `autogain`, `take<N>`, `version`); the sliders are adjustable
   (± 5 %). `axButton` in app/App.swift.
 - Keys: **R** record / stop, **Space** the last take, **A** auto gain.
 
@@ -51,7 +51,7 @@ Input row, each with its meter and device menu.
   channel element as on the ADAM: 1 and 2) and listens to it, so the volume keys and System Settings move the slider.
   A device without a settable volume gets the app's own gain (`inSoft` / `outSoft`, UserDefaults `inGain` / `outGain`),
   applied in the IOProcs.
-- **Deleting**: the take is never written to disk. QUIT, OFF and ⌘Q call `forget()` (devices released, arrays
+- **Deleting**: the take is never written to disk. OFF and ⌘Q call `forget()` (devices released, arrays
   emptied); a crash leaves nothing either. Closing the window keeps the app ON and the take with it (swift-apps.md).
 
 ## The files
@@ -62,7 +62,7 @@ Input row, each with its meter and device menu.
 | `app/Audio.swift` | devices, the ring, meters, recording, playing, permissions |
 | `icon/make_icon.swift` | the icon, drawn with the version under it |
 | `build.sh` | swiftc, Info.plist, icon, signed "Mantra Apps", copied to /Applications, then the running copy quit and the new one opened |
-| `tools/relaunch.swift` | presses the running copy's QUIT through Accessibility (or its menu's Quit), waits for it to go, opens the new one; never kills |
+| `tools/relaunch.swift` | presses the running copy's OFF (QUIT in v4–v6) through Accessibility (or its menu's Quit), waits for it to go, opens the new one; never kills |
 
 ## Building and testing
 
