@@ -44,3 +44,9 @@
 | 2 | Every recording is its own waveform in a list; a new empty one opens for the next recording | in progress |
 | 3 | No play button: a click on a waveform plays / pauses it | in progress |
 | 4 | ⌘-click on a waveform jumps there | in progress |
+
+> Please shorten this on top text. Just put top.
+
+| # | Item | Status |
+|---|---|---|
+| 5 | "ON TOP" becomes "TOP" | in progress |
