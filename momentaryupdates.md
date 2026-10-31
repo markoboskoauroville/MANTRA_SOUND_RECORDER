@@ -101,3 +101,9 @@
 | # | Item | Status |
 |---|---|---|
 | 1 | "in memory only · gone when the app quits" removed from the Takes panel | done in v8 |
+
+## 31.10.2026, closed
+
+> This project is gone, please close it.
+
+**Status:** closed at v8, 31.10.2026. Everything pushed; the lessons are in MANTRA_MANIFEST lessons-learned.md.
