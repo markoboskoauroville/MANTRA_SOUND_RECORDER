@@ -59,3 +59,11 @@
 |---|---|---|
 | 1 | Every control an Accessibility button (QUIT, OFF, TOP, ✕, PERMISSIONS, record, auto gain, each take, sliders) | done in v4 |
 | 2 | build.sh quits the running copy through Accessibility (QUIT, or the menu's Quit) and opens the new one | done in v4: measured, v2 quit by its menu, v4 by its QUIT button, the new one opened |
+
+## 31.10.2026, v5
+
+> Now you can add the save button in upper right corner of each waveform.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | SAVE in the upper right corner of each take's waveform | in progress |
