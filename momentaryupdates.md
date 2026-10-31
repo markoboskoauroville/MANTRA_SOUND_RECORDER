@@ -36,3 +36,11 @@
 | # | Item | Status |
 |---|---|---|
 | 1 | AUTO GAIN on the input, CQ's Gain Assistant icons (knob arc: gear working, ? waiting, ! failed, ✓ done, from CQ MixPad 1.2.2's own "KAuto Gain Steps" graphics), sets the level and stops by itself | in progress |
+
+> So idea with this app will be that in this session every time I record the new waveform is opening up with the only play button of course and the next one is for new recording automatically opening. so I can easily compare recordings and play button is actually pressing on the waveform itself. So in that sense we can save on user interface. Put only waveform, I can click on to play and pause. And if I want to jump on different parts of the waveform, I press command and then I click on that part.
+
+| # | Item | Status |
+|---|---|---|
+| 2 | Every recording is its own waveform in a list; a new empty one opens for the next recording | in progress |
+| 3 | No play button: a click on a waveform plays / pauses it | in progress |
+| 4 | ⌘-click on a waveform jumps there | in progress |
