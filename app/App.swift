@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 2
+let VERSION = 3
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -43,21 +43,25 @@ struct Root: View {
 
     var body: some View {
         GeometryReader { g in
+            ScrollViewReader { sv in
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 12) {
                     TopRow(missing: missing)
                     DevicesPanel(r: r)
-                    RecorderPanel(r: r)
+                    TakesPanel(r: r)
                     Footer()
                 }
                 .frame(width: max(0, g.size.width - 2 * margin), alignment: .leading)
                 .padding(.horizontal, margin).padding(.bottom, margin)
             }
-            .scrollIndicators(.never)
+            .scrollIndicators(.automatic)
+            .onChange(of: r.takes.count) { withAnimation { sv.scrollTo("next", anchor: .bottom) } }
+            .onChange(of: r.recording) { if r.recording { withAnimation { sv.scrollTo("next", anchor: .bottom) } } }
+            }
         }
         .ignoresSafeArea(.container, edges: .top)          // the top row sits in the hidden title bar, beside the traffic lights
         .background(Ink.ground)
-        .frame(minWidth: 580, idealWidth: 720, maxWidth: .infinity, minHeight: 520, idealHeight: 540, maxHeight: .infinity)
+        .frame(minWidth: 600, idealWidth: 720, maxWidth: .infinity, minHeight: 520, idealHeight: 540, maxHeight: .infinity)
         .environment(\.colorScheme, .dark)
         .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
             let m = Permissions.missing
@@ -81,7 +85,8 @@ struct TopRow: View {
                 Text("OFF").foregroundStyle(Ink.grey)
                     .contentShape(Rectangle()).onTapGesture { NSApp.terminate(nil) }
                 Spacer()
-                Text("ON TOP").foregroundStyle(onTop ? Ink.green : Ink.grey)
+                // v3: "Just put top" (Marko, 31.10.2026)
+                Text("TOP").foregroundStyle(onTop ? Ink.green : Ink.grey)
                     .contentShape(Rectangle()).onTapGesture { onTop.toggle(); TopRow.float(onTop) }
                     .help("Always on top: green, the window stays above every other window")
                 if !missing.isEmpty {
@@ -136,10 +141,16 @@ struct DevicesPanel: View {
         }.font(.system(size: 11)).foregroundStyle(Ink.dim).padding(.leading, 160))) {
             DeviceRow(icon: "speaker.wave.2.fill", name: "Output", meter: r.outMeter,
                       volume: r.outVolume, onDevice: r.outOnDevice, setVolume: { r.setVolume(input: false, $0) },
-                      devices: r.outputs, uid: r.outUID, enabled: true, fill: Ink.rowGrey) { r.chooseOutput($0) }
+                      devices: r.outputs, uid: r.outUID, enabled: true, fill: Ink.rowGrey,
+                      extra: AnyView(Color.clear.frame(width: 30, height: 30))) { r.chooseOutput($0) }
             DeviceRow(icon: "mic.fill", name: "Input", meter: r.inMeter,
                       volume: r.inVolume, onDevice: r.inOnDevice, setVolume: { r.setVolume(input: true, $0) },
-                      devices: r.inputs, uid: r.inUID, enabled: !r.recording, fill: Ink.rowGreen) { r.chooseInput($0) }
+                      devices: r.inputs, uid: r.inUID, enabled: !r.recording, fill: Ink.rowGreen,
+                      extra: AnyView(AutoGainKey(r: r))) { r.chooseInput($0) }
+            if let n = r.gainNote {
+                Text(n).font(.system(size: 11, design: .monospaced)).foregroundStyle(r.gain == .failed ? Ink.amber : Ink.text)
+                    .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 14).padding(.top, 6)
+            }
             if let e = r.error {
                 Text(e).font(.system(size: 11)).foregroundStyle(Ink.amber)
                     .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 14).padding(.vertical, 6)
@@ -159,6 +170,7 @@ struct DeviceRow: View {
     let uid: String
     let enabled: Bool
     let fill: Color
+    var extra: AnyView = AnyView(EmptyView())
     let choose: (String) -> Void
 
     var body: some View {
@@ -166,12 +178,13 @@ struct DeviceRow: View {
             Image(systemName: icon).font(.system(size: 13)).foregroundStyle(Ink.text)
                 .frame(width: 28, height: 28).background(RoundedRectangle(cornerRadius: 7).fill(Ink.tile))
             Text(name).font(.system(size: 14)).foregroundStyle(Ink.text).frame(width: 62, alignment: .leading)
+            extra
             VStack(spacing: 6) {
                 VolumeSlider(value: volume, set: setVolume).frame(height: 16)
                     .help(onDevice ? "The device's own volume (the volume keys move it too)" : "This device has no volume of its own: the app's gain")
                 MeterView(m: meter).frame(height: 11)
             }
-            .frame(minWidth: 110)
+            .frame(minWidth: 80)
             VStack(alignment: .trailing, spacing: 5) {
                 Text("\(Int((volume * 100).rounded())) %").font(.system(size: 12, weight: .semibold, design: .monospaced))
                 Text(readout).font(.system(size: 10, design: .monospaced)).foregroundStyle(Ink.dim)
@@ -181,7 +194,7 @@ struct DeviceRow: View {
                 ForEach(devices) { d in Text(d.name).tag(d.uid) }
             }
             .labelsHidden().pickerStyle(.menu).disabled(!enabled)
-            .frame(minWidth: 150, maxWidth: 230)
+            .frame(minWidth: 196, maxWidth: 240)
         }
         .padding(.horizontal, 14).frame(height: 56)
         .background(fill)
@@ -246,32 +259,33 @@ struct MeterView: View {
     }
 }
 
-// ---------------------------------------------------------------- the recorder
-struct RecorderPanel: View {
+// ---------------------------------------------------------------- the takes
+// v3 (Marko, 31.10.2026): "every time I record the new waveform is opening up ... and the next one is for new recording
+// automatically opening ... play button is actually pressing on the waveform itself ... I can click on to play and
+// pause. And if I want to jump on different parts of the waveform, I press command and then I click on that part."
+struct TakesPanel: View {
     @ObservedObject var r: Recorder
     var body: some View {
-        Panel(title: "Recorder", right: AnyView(
-            Text(r.frames > 0 ? "\(Int(r.takeRate)) Hz · stereo" : "")
+        Panel(title: "Takes", right: AnyView(
+            Text(r.takes.isEmpty ? "in memory only · gone when the app quits" : "\(r.takes.count) · in memory only · gone when the app quits")
                 .font(.system(size: 11)).foregroundStyle(Ink.dim))) {
-            VStack(alignment: .leading, spacing: 12) {
-                Waveform(r: r).frame(height: 160)
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(r.takes) { t in TakeRow(r: r, t: t) }
+                NextRow(r: r).id("next")
                 HStack(spacing: 16) {
                     RecordKey(r: r)
-                    PlayKey(r: r)
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 3) {
                         if r.recording {
-                            (Text("REC  ").foregroundStyle(Ink.red) + Text(clock(r.seconds)).foregroundStyle(Ink.text))
+                            (Text("REC  ").foregroundStyle(Ink.red) + Text(clock(r.current?.seconds ?? 0)).foregroundStyle(Ink.text))
                                 .font(.system(size: 16, weight: .bold, design: .monospaced))
                         } else {
-                            Text("\(clock(r.position)) / \(clock(r.frames > 0 ? r.seconds : 0))")
-                                .font(.system(size: 16, weight: .bold, design: .monospaced)).foregroundStyle(Ink.text)
+                            Text("take \(r.nextNumber)").font(.system(size: 16, weight: .bold, design: .monospaced)).foregroundStyle(Ink.text)
                         }
-                        Text("R record · Space play").font(.system(size: 10, design: .monospaced)).foregroundStyle(Ink.dim)
+                        Text("R record · click a take: play / pause · ⌘-click: jump · Space: the last · A: auto gain")
+                            .font(.system(size: 10, design: .monospaced)).foregroundStyle(Ink.dim)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Spacer(minLength: 8)
-                    Text("in memory only · gone when the app quits")
-                        .font(.system(size: 11)).foregroundStyle(Ink.dim)
-                        .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
                 }
             }
             .padding(.horizontal, 14).padding(.bottom, 14)
@@ -279,47 +293,89 @@ struct RecorderPanel: View {
     }
 }
 
-/// The take: the loudest sample of each column, mirrored round the middle line. Played part green, the rest grey,
-/// the playhead white; while recording red, growing from the left over the first ten seconds, then squeezing.
-struct Waveform: View {
+/// a take: its number and time above, its waveform; the waveform is the play key
+struct TakeRow: View {
     @ObservedObject var r: Recorder
-
+    let t: Take
     var body: some View {
-        GeometryReader { g in
-            Canvas { c, size in
-                c.fill(Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 8), with: .color(Ink.well))
-                let mid = size.height / 2
-                c.fill(Path(CGRect(x: 0, y: mid - 0.5, width: size.width, height: 1)), with: .color(Ink.line))
-                let p = r.peaks
-                guard !p.isEmpty else { return }
-                let span = r.recording ? max(p.count, Int(10 * r.takeRate) / Recorder.block) : p.count
-                let step: CGFloat = 2
-                let cols = Int(size.width / step)
-                let playX = r.frames > 0 ? size.width * CGFloat(r.cursor / Double(r.frames)) : 0
-                let usable = mid - 6
-                for col in 0..<cols {
-                    let a = col * span / cols, b = max(a + 1, (col + 1) * span / cols)
-                    if a >= p.count { break }
-                    var m: Float = 0
-                    for i in a..<min(b, p.count) { m = max(m, p[i]) }
-                    let h = max(1, CGFloat(min(m, 1)) * usable)
-                    let x = CGFloat(col) * step
-                    let ink: Color = r.recording ? Ink.red : (x < playX ? Ink.green : Ink.grey)
-                    c.fill(Path(CGRect(x: x, y: mid - h, width: step * 0.7, height: 2 * h)), with: .color(ink))
-                }
-                if !r.recording {
-                    c.fill(Path(CGRect(x: min(playX, size.width - 1.5), y: 0, width: 1.5, height: size.height)), with: .color(.white))
-                }
+        let on = r.playingID == t.id
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("\(t.id)").font(.system(size: 12, weight: .bold, design: .monospaced)).foregroundStyle(on ? Ink.green : Ink.text)
+                if on { Image(systemName: "play.fill").font(.system(size: 9)).foregroundStyle(Ink.green) }
+                Spacer()
+                Text("\(clock(t.position)) / \(clock(t.seconds))").font(.system(size: 11, design: .monospaced)).foregroundStyle(Ink.dim)
             }
-            .overlay {
-                if r.peaks.isEmpty {
-                    Text(r.canRecord ? "press ● to record" : "the microphone is not allowed yet: PERMISSIONS, top right")
+            GeometryReader { g in
+                Wave(peaks: t.peaks, span: t.peaks.count, played: t.frames > 0 ? t.cursor / Double(t.frames) : 0,
+                     ink: on ? Ink.green : Ink.green.opacity(0.55), rest: Ink.grey, head: on || t.cursor > 0, lit: on)
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 0).onEnded { v in
+                        if NSEvent.modifierFlags.contains(.command) { r.jump(t, Double(v.location.x / max(1, g.size.width))) }
+                        else { r.toggle(t) }
+                    })
+            }
+            .frame(height: 74)
+        }
+    }
+}
+
+/// the empty row that waits for the next take; red and growing while it records
+struct NextRow: View {
+    @ObservedObject var r: Recorder
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("\(r.nextNumber)").font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundStyle(r.recording ? Ink.red : Ink.dim)
+                Spacer()
+            }
+            ZStack {
+                let p = r.current?.peaks ?? []
+                Wave(peaks: p, span: max(p.count, Int(10 * r.inRate) / Recorder.block), played: 0,
+                     ink: Ink.red, rest: Ink.red, head: false, lit: r.recording)
+                if !r.recording {
+                    Text(r.canRecord ? "● or R records take \(r.nextNumber)" : "the microphone is not allowed yet: PERMISSIONS, top right")
                         .font(.system(size: 12, design: .monospaced)).foregroundStyle(Ink.dim)
                         .multilineTextAlignment(.center).padding()
                 }
             }
-            .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0).onChanged { v in r.seek(Double(v.location.x / max(1, g.size.width))) })
+            .frame(height: 74)
+        }
+    }
+}
+
+/// The loudest sample of each column, mirrored round the middle line: `ink` up to `played`, `rest` after it.
+struct Wave: View {
+    let peaks: [Float]
+    let span: Int
+    let played: Double
+    let ink: Color, rest: Color
+    let head: Bool
+    let lit: Bool
+    var body: some View {
+        Canvas { c, size in
+            c.fill(Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 8), with: .color(Ink.well))
+            if lit { c.stroke(Path(roundedRect: CGRect(origin: .zero, size: size).insetBy(dx: 0.5, dy: 0.5), cornerRadius: 8), with: .color(ink.opacity(0.5)), lineWidth: 1) }
+            let mid = size.height / 2
+            c.fill(Path(CGRect(x: 0, y: mid - 0.5, width: size.width, height: 1)), with: .color(Ink.line))
+            guard !peaks.isEmpty, span > 0 else { return }
+            let step: CGFloat = 2
+            let cols = Int(size.width / step)
+            let playX = size.width * CGFloat(played)
+            let usable = mid - 5
+            for col in 0..<cols {
+                let a = col * span / cols, b = max(a + 1, (col + 1) * span / cols)
+                if a >= peaks.count { break }
+                var m: Float = 0
+                for i in a..<min(b, peaks.count) { m = max(m, peaks[i]) }
+                let h = max(1, CGFloat(min(m, 1)) * usable)
+                let x = CGFloat(col) * step
+                c.fill(Path(CGRect(x: x, y: mid - h, width: step * 0.7, height: 2 * h)), with: .color(x < playX ? ink : rest))
+            }
+            if head {
+                c.fill(Path(CGRect(x: min(playX, size.width - 1.5), y: 0, width: 1.5, height: size.height)), with: .color(.white))
+            }
         }
     }
 }
@@ -328,15 +384,16 @@ struct Waveform: View {
 struct RecordKey: View {
     @ObservedObject var r: Recorder
     var body: some View {
-        let able = r.canRecord || r.recording || Permissions.missing.contains("Microphone")
+        let able = r.canRecord || Permissions.missing.contains("Microphone")
         ZStack {
             if r.recording {
+                let s = r.current?.seconds ?? 0
                 Circle().fill(Ink.red)
-                Text(String(format: "%02d:%02d", Int(r.seconds) / 60, Int(r.seconds) % 60))
+                Text(String(format: "%02d:%02d", Int(s) / 60, Int(s) % 60))
                     .font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundStyle(.white)
             } else {
                 Circle().stroke(able ? Ink.ring : Ink.dark, lineWidth: 2)
-                Circle().fill(able && !r.playing ? Ink.red : Ink.dark).frame(width: 20, height: 20)
+                Circle().fill(able ? Ink.red : Ink.dark).frame(width: 20, height: 20)
             }
         }
         .frame(width: 48, height: 48).contentShape(Circle())
@@ -345,19 +402,36 @@ struct RecordKey: View {
     }
 }
 
-struct PlayKey: View {
+/// CQ's Gain Assistant key, drawn as CQ MixPad draws its steps: a knob's arc open at the bottom, and inside it the
+/// orange gear (press me; turning while it adjusts), ? listening for sound, a green ✓ done, ! on a dark disc failed.
+struct AutoGainKey: View {
     @ObservedObject var r: Recorder
+    static let orange = Ink.hex(0xFF5A00)
     var body: some View {
-        let able = r.canPlay
         ZStack {
-            Circle().stroke(able ? Ink.ring : Ink.dark, lineWidth: 2)
-            Image(systemName: r.playing ? "stop.fill" : "play.fill")
-                .font(.system(size: 17)).foregroundStyle(r.playing ? Ink.green : (able ? .white : Ink.dark))
-                .offset(x: r.playing ? 0 : 2)
+            Circle().trim(from: 0, to: 0.75).rotation(.degrees(135))
+                .stroke(r.gain == .idle ? Ink.ring : Ink.text, style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+            switch r.gain {
+            case .idle:
+                Image(systemName: "gearshape.fill").font(.system(size: 12)).foregroundStyle(Self.orange)
+            case .listening:
+                Text("?").font(.system(size: 15, weight: .heavy)).foregroundStyle(Self.orange)
+            case .adjusting:
+                TimelineView(.animation) { tl in
+                    Image(systemName: "gearshape.fill").font(.system(size: 12)).foregroundStyle(Self.orange)
+                        .rotationEffect(.degrees(tl.date.timeIntervalSinceReferenceDate * 180))
+                }
+            case .done:
+                Image(systemName: "checkmark").font(.system(size: 13, weight: .heavy)).foregroundStyle(Ink.green)
+            case .failed:
+                Circle().fill(Ink.dark).padding(5)
+                Text("!").font(.system(size: 13, weight: .heavy)).foregroundStyle(Self.orange)
+            }
         }
-        .frame(width: 48, height: 48).contentShape(Circle())
-        .onTapGesture { r.togglePlay() }
-        .help("Play / stop (Space)")
+        .frame(width: 30, height: 30).contentShape(Circle())
+        .opacity(r.recording ? 0.35 : 1)
+        .onTapGesture { r.toggleAutoGain() }
+        .help("Auto gain (A): sing or play as loud as you will; the input is set so the loudest peak sits at -12 dB, then it stops")
     }
 }
 
@@ -385,8 +459,9 @@ final class Delegate: NSObject, NSApplicationDelegate {
         keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
             if !e.modifierFlags.intersection([.command, .control, .option]).isEmpty { return e }
             switch e.charactersIgnoringModifiers?.lowercased() {
-            case " ": REC.togglePlay(); return nil
+            case " ": REC.toggleLast(); return nil
             case "r": REC.toggleRecord(); return nil
+            case "a": REC.toggleAutoGain(); return nil
             default: return e
             }
         }
@@ -422,6 +497,10 @@ enum Main {
             // the test take played to an output whose name contains the word: --play-test BlackHole
             exit(playTest(a[i + 1]) ? 0 : 1)
         }
+        if let i = a.firstIndex(of: "--gain-test"), i + 1 < a.count {
+            // the auto gain on an input whose name contains the word, its volume put back afterwards: --gain-test BlackHole
+            exit(gainTest(a[i + 1]) ? 0 : 1)
+        }
         RecorderApp.main()
     }
 
@@ -430,8 +509,10 @@ enum Main {
         NSApp.setActivationPolicy(.prohibited)
         NSApp.appearance = NSAppearance(named: .darkAqua)
         let r = Recorder(live: false)
-        r.loadTestTake()
-        r.pose(fraction: 0.42, inDB: (-21, -24), outDB: (-13, -15))
+        r.addTestTake(seconds: 6)
+        r.addTestTake(seconds: 4.5, hz: 330, shape: 2.6)
+        r.addTestTake(seconds: 7, hz: 520, shape: 1.1)
+        r.pose(playing: 2, at: 0.42, inDB: (-21, -24), outDB: (-13, -15), gain: .adjusting)
         let v = NSHostingView(rootView: Root(r: r))
         v.frame = NSRect(x: 0, y: 0, width: w, height: h)
         let win = NSWindow(contentRect: v.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -444,11 +525,32 @@ enum Main {
         return (try? png.write(to: URL(fileURLWithPath: path))) != nil
     }
 
+    static func gainTest(_ name: String) -> Bool {
+        let d = UserDefaults.standard, savedIn = d.string(forKey: "input")
+        let r = Recorder(live: true)
+        defer { if let v = savedIn { d.set(v, forKey: "input") } else { d.removeObject(forKey: "input") } }
+        guard r.chooseInput(named: name) else { print("no input named \(name)"); return false }
+        let before = r.inputVolumeOnDevice
+        defer { if let v = before { r.setInputVolumeOnDevice(v) }; r.forget() }
+        print("input \(r.inputName), volume before \(before.map { String(format: "%.3f", $0) } ?? "none (app gain)")")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        r.toggleAutoGain()
+        var last = ""
+        let end = Date().addingTimeInterval(40)
+        while Date() < end {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            let line = "\(r.gain) \(String(format: "%.3f", r.inVolume)) \(r.gainNote ?? "")"
+            if line != last { print(String(format: "%5.1f dB  ", r.inMeter.holdL) + line); last = line }
+            if r.gain == .done || r.gain == .failed { break }
+        }
+        return r.gain == .done
+    }
+
     static func playTest(_ name: String) -> Bool {
         let r = Recorder(live: false)
         guard r.chooseOutput(named: name) else { print("no output named \(name)"); return false }
-        r.loadTestTake(seconds: 3)
-        r.play()
+        let t = r.addTestTake(seconds: 3)
+        r.play(t)
         guard r.playing else { print("did not play: \(r.error ?? "?")"); return false }
         var loudest: Float = -90
         let end = Date().addingTimeInterval(6)
@@ -456,7 +558,7 @@ enum Main {
             RunLoop.main.run(until: Date().addingTimeInterval(0.05))
             loudest = max(loudest, r.outMeter.l)
         }
-        print(String(format: "played %.1f s of the test take to %@, the output meter's loudest %.1f dBFS", r.seconds, r.outputName, loudest))
+        print(String(format: "played %.1f s of the test take to %@, the output meter's loudest %.1f dBFS", t.seconds, r.outputName, loudest))
         return !r.playing && loudest > -20
     }
 }

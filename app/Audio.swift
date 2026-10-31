@@ -116,6 +116,33 @@ final class VolumeWatch {
         return sum / Float(elements.count)
     }
 
+    /// v3, for the auto gain: the device's volume in dB and its range, when it says them
+    var decibels: Float? {
+        var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeDecibels, mScope: scope, mElement: elements[0])
+        var settable: DarwinBoolean = false
+        guard AudioObjectHasProperty(dev, &a), AudioObjectIsPropertySettable(dev, &a, &settable) == noErr, settable.boolValue else { return nil }
+        var v = Float32(0); var sz = UInt32(4)
+        return AudioObjectGetPropertyData(dev, &a, 0, nil, &sz, &v) == noErr ? v : nil
+    }
+
+    var dbRange: (Float, Float)? {
+        var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeRangeDecibels, mScope: scope, mElement: elements[0])
+        guard AudioObjectHasProperty(dev, &a) else { return nil }
+        var r = AudioValueRange(); var sz = UInt32(MemoryLayout<AudioValueRange>.size)
+        guard AudioObjectGetPropertyData(dev, &a, 0, nil, &sz, &r) == noErr, r.mMaximum > r.mMinimum else { return nil }
+        return (Float(r.mMinimum), Float(r.mMaximum))
+    }
+
+    func setDecibels(_ db: Float) {
+        for e in elements {
+            var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeDecibels, mScope: scope, mElement: e)
+            var settable: DarwinBoolean = false
+            guard AudioObjectHasProperty(dev, &a), AudioObjectIsPropertySettable(dev, &a, &settable) == noErr, settable.boolValue else { continue }
+            var x = Float32(db)
+            AudioObjectSetPropertyData(dev, &a, 0, nil, 4, &x)
+        }
+    }
+
     func set(_ v: Float) {
         for e in elements {
             var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar, mScope: scope, mElement: e)
@@ -173,25 +200,42 @@ struct Meter {
     }
 }
 
+/// One recording: its frames, its waveform, where its playhead is. v3 (Marko, 31.10.2026: "every time I record the new
+/// waveform is opening up ... so I can easily compare recordings"): the session keeps every take, in memory only.
+final class Take: Identifiable {
+    let id: Int
+    let rate: Double
+    var l: [Float] = [], r: [Float] = []
+    var peaks: [Float] = []
+    var cursor: Double = 0
+    init(id: Int, rate: Double) { self.id = id; self.rate = rate }
+    var frames: Int { l.count }
+    var seconds: Double { Double(frames) / rate }
+    var position: Double { cursor / rate }
+}
+
+/// CQ's Gain Assistant, step by step (the "KAuto Gain Steps" of CQ MixPad): ? listening, gear adjusting, ✓ done, ! failed.
+enum GainStep: Equatable { case idle, listening, adjusting, done, failed }
+
 final class Recorder: ObservableObject {
     @Published var inputs: [Device] = []
     @Published var outputs: [Device] = []
     @Published private(set) var inUID = ""
     @Published private(set) var outUID = ""
     @Published private(set) var recording = false
-    @Published private(set) var playing = false
     @Published private(set) var inMeter = Meter()
     @Published private(set) var outMeter = Meter()
-    /// the take's waveform: the loudest sample of every `block` frames
-    @Published private(set) var peaks: [Float] = []
-    @Published private(set) var frames = 0
-    /// where play starts or is, in frames of the take
-    @Published private(set) var cursor: Double = 0
     @Published var error: String?
     static let block = 256
 
-    private(set) var takeRate: Double = 48000
-    private var takeL: [Float] = [], takeR: [Float] = []
+    /// the takes of this session, oldest first; the one being recorded is `current` until it stops
+    @Published private(set) var takes: [Take] = []
+    @Published private(set) var current: Take?
+    @Published private(set) var playingID: Int?
+    /// Space plays this one: the last played, or the newest
+    private(set) var lastID: Int?
+    private var nextID = 1
+    var nextNumber: Int { nextID }
     private var blockMax: Float = 0, blockN = 0
 
     // the input
@@ -211,17 +255,22 @@ final class Recorder: ObservableObject {
     private var inWatch: VolumeWatch?, outWatch: VolumeWatch?
     private var inSoft: Float = 1, outSoft: Float = 1
     // read by the audio threads: plain flags, not the watch objects
-    private var inWatchless: Bool { !inOnDeviceFlag }
-    private var outWatchless: Bool { !outOnDeviceFlag }
     private var inOnDeviceFlag = false, outOnDeviceFlag = false
 
-    // the output: a copy of the take the audio thread reads, at the output's own rate (linear interpolation)
+    // the output: a copy of the playing take the audio thread reads, at the output's own rate (linear interpolation)
     private var outDev: AudioDeviceID = 0, outProc: AudioDeviceIOProcID?
+    private var playingTake: Take?
     private var pL: UnsafeMutablePointer<Float>?, pR: UnsafeMutablePointer<Float>?
     private var pN = 0
     private var pPos: Double = 0, pStep: Double = 1
     private var pDone = false
     private var rawOutL: Float = 0, rawOutR: Float = 0
+
+    // v3: auto gain
+    @Published private(set) var gain: GainStep = .idle
+    @Published private(set) var gainNote: String?
+    static let gainTarget: Float = -12           // the loudest peak, dBFS: where the meter turns from green to amber
+    private var gStart = Date(), gPeak: Float = -90, gRound = 0, gListenStart = Date()
 
     private let live: Bool
     private var timer: Timer?
@@ -263,8 +312,8 @@ final class Recorder: ObservableObject {
         refreshDevices()
         let i = pick(inUID, inputs, Devices.defaultDevice(input: true))
         let o = pick(outUID, outputs, Devices.defaultDevice(input: false))
-        if i != inUID { if recording { stopRecording() }; inUID = i; startInput() }
-        if o != outUID { stopPlaying(); outUID = o }
+        if i != inUID { if recording { stopRecording() }; stopAutoGain(); inUID = i; startInput() }
+        if o != outUID { pause(); outUID = o }
         watchVolumes()
     }
 
@@ -297,6 +346,7 @@ final class Recorder: ObservableObject {
     // ---------------------------------------------------------------- choosing
     func chooseInput(_ uid: String) {
         guard uid != inUID, !recording else { return }
+        stopAutoGain()
         inUID = uid
         if live { UserDefaults.standard.set(uid, forKey: "input") }
         watchVolumes()
@@ -305,13 +355,22 @@ final class Recorder: ObservableObject {
 
     func chooseOutput(_ uid: String) {
         guard uid != outUID else { return }
-        let was = playing
-        stopPlaying()
+        let was = playingTake
+        pause()
         outUID = uid
         if live { UserDefaults.standard.set(uid, forKey: "output") }   // a test never changes his choice
         watchVolumes()
-        if was { play() }
+        if let t = was { play(t) }
     }
+
+    func chooseInput(named part: String) -> Bool {
+        guard let d = inputs.first(where: { $0.name.localizedCaseInsensitiveContains(part) }) else { return false }
+        chooseInput(d.uid)
+        return true
+    }
+
+    var inputVolumeOnDevice: Float? { inWatch?.value }
+    func setInputVolumeOnDevice(_ v: Float) { inWatch?.set(v) }
 
     func chooseOutput(named part: String) -> Bool {
         guard let d = outputs.first(where: { $0.name.localizedCaseInsensitiveContains(part) }) else { return false }
@@ -350,7 +409,7 @@ final class Recorder: ObservableObject {
                     } else {
                         for i in 0..<n { l[i] = d0[i]; r[i] = d0[i] }     // a mono microphone: the same on both sides
                     }
-                    let g = self.inWatchless ? self.inSoft : 1
+                    let g = self.inOnDeviceFlag ? 1 : self.inSoft
                     if g != 1 { for i in 0..<n { l[i] *= g; r[i] *= g } }
                     for i in 0..<n { pl = max(pl, abs(l[i])); pr = max(pr, abs(r[i])) }
                     self.ring.write(l.baseAddress!, r.baseAddress!, n)
@@ -371,61 +430,78 @@ final class Recorder: ObservableObject {
         rawInL = 0; rawInR = 0
     }
 
-    var canRecord: Bool { inProc != nil && !playing }
+    var canRecord: Bool { inProc != nil }
 
     // ---------------------------------------------------------------- recording
     func toggleRecord() { recording ? stopRecording() : record() }
 
     func record() {
-        guard !playing else { return }
+        guard !recording else { return }
         guard inProc != nil else { Permissions.openMissing(); return }
-        takeL = []; takeR = []; peaks = []; frames = 0; cursor = 0
+        pause()
+        stopAutoGain()
+        let t = Take(id: nextID, rate: inRate)
+        t.l.reserveCapacity(Int(inRate) * 60); t.r.reserveCapacity(Int(inRate) * 60)
+        current = t
         blockMax = 0; blockN = 0
-        takeRate = inRate
-        takeL.reserveCapacity(Int(takeRate) * 60); takeR.reserveCapacity(Int(takeRate) * 60)
         readPos = ring.fill()
         recording = true
     }
 
+    /// the take joins the list, and the empty row below it waits for the next one
     func stopRecording() {
-        guard recording else { return }
+        guard recording, let t = current else { return }
         drain()
-        if blockN > 0 { peaks.append(blockMax); blockMax = 0; blockN = 0 }
+        if blockN > 0 { t.peaks.append(blockMax); blockMax = 0; blockN = 0 }
         recording = false
-        cursor = 0
+        current = nil
+        if t.frames > 1 { takes.append(t); lastID = t.id; nextID += 1 }
     }
 
     /// what the input wrote since the last tick, into the take and its waveform
     private func drain() {
+        guard let t = current else { return }
         while true {
             let n = dL.withUnsafeMutableBufferPointer { l in
                 dR.withUnsafeMutableBufferPointer { r in ring.read(&readPos, l.baseAddress!, r.baseAddress!, l.count) }
             }
             if n == 0 { break }
-            takeL.append(contentsOf: dL[0..<n]); takeR.append(contentsOf: dR[0..<n])
-            var add: [Float] = []
+            t.l.append(contentsOf: dL[0..<n]); t.r.append(contentsOf: dR[0..<n])
             for i in 0..<n {
                 blockMax = max(blockMax, abs(dL[i]), abs(dR[i])); blockN += 1
-                if blockN == Self.block { add.append(blockMax); blockMax = 0; blockN = 0 }
+                if blockN == Self.block { t.peaks.append(blockMax); blockMax = 0; blockN = 0 }
             }
-            if !add.isEmpty { peaks.append(contentsOf: add) }
-            frames = takeL.count
         }
     }
 
-    // ---------------------------------------------------------------- playing
-    var canPlay: Bool { frames > 1 && !recording }
+    // ---------------------------------------------------------------- playing: a click on a take
+    func toggle(_ t: Take) { playingID == t.id ? pause() : play(t) }
 
-    func togglePlay() { playing ? stopPlaying() : play() }
+    /// Space: the last one played, or the newest
+    func toggleLast() {
+        if playingID != nil { pause(); return }
+        if let t = takes.first(where: { $0.id == lastID }) ?? takes.last { play(t) }
+    }
 
-    func play() {
-        guard canPlay, !playing, let dev = outputs.first(where: { $0.uid == outUID }) else { return }
-        if cursor >= Double(frames - 2) { cursor = 0 }
-        let l = UnsafeMutablePointer<Float>.allocate(capacity: frames), r = UnsafeMutablePointer<Float>.allocate(capacity: frames)
-        takeL.withUnsafeBufferPointer { l.update(from: $0.baseAddress!, count: frames) }
-        takeR.withUnsafeBufferPointer { r.update(from: $0.baseAddress!, count: frames) }
-        pL = l; pR = r; pN = frames
-        pPos = cursor; pStep = takeRate / Devices.rate(dev.id); pDone = false
+    /// ⌘-click: jump there, and play from there
+    func jump(_ t: Take, _ fraction: Double) {
+        guard t.frames > 1 else { return }
+        let f = min(max(fraction, 0), 1) * Double(t.frames - 1)
+        t.cursor = f
+        if playingID == t.id { pPos = f } else { play(t) }
+        objectWillChange.send()
+    }
+
+    func play(_ t: Take) {
+        guard !recording, t.frames > 1, let dev = outputs.first(where: { $0.uid == outUID }) else { return }
+        pause()
+        if t.cursor >= Double(t.frames - 2) { t.cursor = 0 }
+        let n = t.frames
+        let l = UnsafeMutablePointer<Float>.allocate(capacity: n), r = UnsafeMutablePointer<Float>.allocate(capacity: n)
+        t.l.withUnsafeBufferPointer { l.update(from: $0.baseAddress!, count: n) }
+        t.r.withUnsafeBufferPointer { r.update(from: $0.baseAddress!, count: n) }
+        pL = l; pR = r; pN = n
+        pPos = t.cursor; pStep = t.rate / Devices.rate(dev.id); pDone = false
         outDev = dev.id
         var op: AudioDeviceIOProcID?
         var st = AudioDeviceCreateIOProcIDWithBlock(&op, outDev, nil) { [weak self] _, _, _, outData, _ in
@@ -441,7 +517,7 @@ final class Recorder: ObservableObject {
             var pos = self.pPos
             let step = self.pStep, N = self.pN
             var pl: Float = 0, pr: Float = 0
-            let g = self.outWatchless ? self.outSoft : 1
+            let g = self.outOnDeviceFlag ? 1 : self.outSoft
             for i in 0..<n {
                 var l: Float = 0, r: Float = 0
                 let k = Int(pos)
@@ -467,84 +543,147 @@ final class Recorder: ObservableObject {
         if st != noErr || op == nil { error = "the output would not open (\(st))"; freePlayback(); return }
         outProc = op
         st = AudioDeviceStart(outDev, op)
-        if st != noErr { error = "the output would not start (\(st))"; stopPlaying(); return }
+        if st != noErr { error = "the output would not start (\(st))"; playingTake = t; pause(); return }
         error = nil
-        playing = true
+        playingTake = t; playingID = t.id; lastID = t.id
     }
 
-    func stopPlaying() {
+    /// the playhead stays where it stopped; the next click goes on from there
+    func pause() {
         if let p = outProc { AudioDeviceStop(outDev, p); AudioDeviceDestroyIOProcID(outDev, p) }
         outProc = nil
-        if pL != nil { cursor = min(pPos, Double(frames)) }
+        if let t = playingTake { t.cursor = min(pPos, Double(t.frames)) }
         freePlayback()
-        playing = false
+        playingTake = nil; playingID = nil
     }
 
     private func freePlayback() {
         pL?.deallocate(); pR?.deallocate(); pL = nil; pR = nil; pN = 0
     }
 
-    /// a click on the waveform: play from there
-    func seek(_ fraction: Double) {
-        guard frames > 1, !recording else { return }
-        let f = min(max(fraction, 0), 1) * Double(frames - 1)
-        if playing { pPos = f }
-        cursor = f
+    // ---------------------------------------------------------------- auto gain
+    // Marko, 31.10.2026: "auto gain option the same as in my CQ mixer series ... when it detects the right level it's
+    // going to adjust the gain automatically and then quits." Press: it listens (?) for sound; heard, it measures the
+    // loudest peak for 2 s and moves the input's volume so that peak lands on -12 dBFS, again until it is within
+    // 1.5 dB (the gear); then ✓ for 4 s and it is off by itself. ! when no sound came in 15 s or the volume ran out.
+    func toggleAutoGain() {
+        if gain == .listening || gain == .adjusting { stopAutoGain(); return }
+        guard !recording else { return }
+        guard inProc != nil else { Permissions.openMissing(); return }
+        gain = .listening; gListenStart = Date(); gRound = 0
+        gainNote = "AUTO GAIN: sing or play as loud as you will record"
     }
 
-    var seconds: Double { Double(frames) / takeRate }
-    var position: Double { cursor / takeRate }
+    private func stopAutoGain() { gain = .idle; gainNote = nil }
+
+    private func failGain(_ why: String) { gain = .failed; gStart = Date(); gainNote = "AUTO GAIN: " + why }
+
+    /// moves the input by `delta` dB; false when it cannot move further that way
+    private func nudgeInput(_ delta: Float) -> Bool {
+        if let w = inWatch {
+            if let db = w.decibels, let range = w.dbRange {
+                let to = min(max(db + delta, range.0), range.1)
+                if abs(to - db) < 0.2 { return false }
+                w.setDecibels(to)
+            } else {
+                let v = w.value, nv = min(max(v * pow(10, delta / 20), 0), 1)
+                if abs(nv - v) < 0.004 { return false }
+                w.set(nv)
+            }
+            inVolume = w.value
+        } else {
+            let nv = min(max(inSoft * pow(10, delta / 20), 0), 1)
+            if abs(nv - inSoft) < 0.004 { return false }
+            setVolume(input: true, nv)
+        }
+        return true
+    }
+
+    private func stepAutoGain(_ peakNow: Float) {
+        let now = Date()
+        switch gain {
+        case .idle: break
+        case .listening:
+            if peakNow > -45 { gain = .adjusting; gStart = now; gPeak = peakNow; gainNote = "AUTO GAIN: listening… keep going" }
+            else if now.timeIntervalSince(gListenStart) > 15 { failGain("no sound came in for 15 s") }
+        case .adjusting:
+            if now < gStart { break }                                 // the new volume settling
+            gPeak = max(gPeak, peakNow)
+            guard now.timeIntervalSince(gStart) >= 2 else { break }
+            if gPeak < -45 { gain = .listening; gListenStart = now; gainNote = "AUTO GAIN: waiting for sound"; break }
+            let delta = Self.gainTarget - gPeak
+            if abs(delta) <= 1.5 {
+                gain = .done; gStart = now
+                gainNote = String(format: "AUTO GAIN: set, the loudest peak at %.1f dB, the input at %d %%", gPeak, Int((inVolume * 100).rounded()))
+            } else if gRound >= 8 {
+                failGain("the level would not settle; try again")
+            } else if !nudgeInput(delta) {
+                failGain(delta > 0 ? "too quiet even at 100 %: closer to the microphone" : "too loud even at the lowest volume")
+            } else {
+                gRound += 1; gPeak = -90; gStart = now.addingTimeInterval(0.3)
+            }
+        case .done, .failed:
+            if now.timeIntervalSince(gStart) > 4 { stopAutoGain() }
+        }
+    }
 
     // ---------------------------------------------------------------- 30 times a second
     private func tick() {
         let dt = 1.0 / 30
         if recording { drain() }
-        if playing {
-            cursor = pPos
-            if pDone { stopPlaying(); cursor = 0 }
+        if let t = playingTake {
+            t.cursor = pPos
+            if pDone { pause(); t.cursor = 0 }
         }
+        stepAutoGain(Meter.db(max(rawInL, rawInR)))
         var m = inMeter; m.feed(rawInL, rawInR, dt: dt); rawInL = 0; rawInR = 0; inMeter = m
         var o = outMeter; o.feed(rawOutL, rawOutR, dt: dt); rawOutL = 0; rawOutR = 0; outMeter = o
     }
 
     // ---------------------------------------------------------------- the end
-    /// QUIT, OFF, ⌘Q: the devices let go and the take is forgotten. It was never on the disk.
+    /// QUIT, OFF, ⌘Q: the devices let go and the takes are forgotten. They were never on the disk.
     func forget() {
-        stopPlaying()
+        pause()
         stopInput()
         recording = false
-        takeL = []; takeR = []; peaks = []; frames = 0; cursor = 0
+        current = nil
+        takes = []
     }
 
     // ---------------------------------------------------------------- tests
-    /// a take made of sound instead of a microphone: a 440 Hz tone at -12 dBFS that swells and fades
-    func loadTestTake(seconds s: Double = 6) {
-        takeRate = 48000
-        let n = Int(takeRate * s)
-        takeL = [Float](repeating: 0, count: n); takeR = takeL
+    /// a take made of sound instead of a microphone: a tone at -12 dBFS that swells and fades
+    @discardableResult
+    func addTestTake(seconds s: Double = 6, hz: Double = 440, shape: Double = 1.7) -> Take {
+        let t = Take(id: nextID, rate: 48000)
+        nextID += 1
+        let n = Int(t.rate * s)
+        t.l = [Float](repeating: 0, count: n); t.r = t.l
         for i in 0..<n {
-            let t = Double(i) / takeRate
-            let env = 0.55 + 0.45 * sin(t * 1.7) * sin(t * 0.6 + 0.4)
-            let v = Float(0.25 * env * sin(2 * .pi * 440 * t))
-            takeL[i] = v; takeR[i] = v * 0.8
+            let x = Double(i) / t.rate
+            let env = 0.55 + 0.45 * sin(x * shape) * sin(x * 0.6 + 0.4)
+            let v = Float(0.25 * env * sin(2 * .pi * hz * x))
+            t.l[i] = v; t.r[i] = v * 0.8
         }
-        frames = n
-        peaks = stride(from: 0, to: n, by: Self.block).map { s in
+        t.peaks = stride(from: 0, to: n, by: Self.block).map { s in
             var m: Float = 0
-            for i in s..<min(n, s + Self.block) { m = max(m, abs(takeL[i]), abs(takeR[i])) }
+            for i in s..<min(n, s + Self.block) { m = max(m, abs(t.l[i]), abs(t.r[i])) }
             return m
         }
-        cursor = 0
+        takes.append(t); lastID = t.id
+        return t
     }
 
-    /// for the picture only: as if it were playing at `fraction`, the meters showing these levels
-    func pose(fraction: Double, inDB: (Float, Float), outDB: (Float, Float)) {
-        cursor = fraction * Double(frames)
-        playing = true
+    /// for the picture only: take `id` as if playing at `fraction`, the meters showing these levels
+    func pose(playing id: Int, at fraction: Double, inDB: (Float, Float), outDB: (Float, Float), gain g: GainStep = .idle) {
+        if let t = takes.first(where: { $0.id == id }) { t.cursor = fraction * Double(t.frames); playingID = id }
         inMeter = Meter(l: inDB.0, r: inDB.1, holdL: inDB.0 + 3, holdR: inDB.1 + 2)
         outMeter = Meter(l: outDB.0, r: outDB.1, holdL: outDB.0 + 2, holdR: outDB.1 + 4)
+        gain = g
+        if g == .adjusting { gainNote = "AUTO GAIN: listening… keep going" }
         timer?.invalidate()
     }
+
+    var playing: Bool { playingID != nil }
 }
 
 // MANTRA_MANIFEST swift-apps.md, PERMISSIONS: the one this app uses is the microphone (every input device, BlackHole too).

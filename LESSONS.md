@@ -25,3 +25,16 @@ Appended, never rewritten. Newest last.
   Microphone, BlackHole and MacBook Pro Microphone have element 0. A device with none falls back to the app's gain.
 - **The audio threads read plain Bools and Floats**, never the VolumeWatch objects that the main thread replaces.
 - **ON TOP** on the first row, a CAMERA toggle word (green on, grey off), `NSWindow.level = .floating`.
+
+## 31.10.2026, v3
+
+- **The CQ's icons are CQ MixPad's own.** Found in the app's binary (CQ MixPad 1.2.2, uncompressed SVGs "KAuto Gain
+  Steps"): a knob arc open at the bottom with ✓ green, ? orange, ! orange on a dark disc, an orange gear with a turning
+  arrow. Redrawn in SwiftUI, nothing copied.
+- **Auto gain in dB when the device knows its range.** One dB step lands where it should (measured on BlackHole:
+  -21.9 → -12.0 in one round); a scalar step is only proportional, so it may take more rounds. Rejected: a gain stage
+  in the app above 100 %, which would clip at the input before any gain could help.
+- **Takes as a list, the waveform as the play key** (Marko). A Take is a class so its playhead can move without
+  copying the frames; the tick publishes the meters 30 times a second, which redraws the rows anyway.
+- **⌘ read from NSEvent.modifierFlags** at the click's end: SwiftUI's gestures have no modifier on macOS 14.
+- **Min width 600**: at 580 the device menu cut "MacBook Pro Microphone".
