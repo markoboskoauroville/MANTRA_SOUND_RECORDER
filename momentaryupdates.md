@@ -76,3 +76,11 @@
 |---|---|---|
 | 2 | Accessibility built into every future app, written in MANTRA_MANIFEST | done: modules/swift-apps.md, "Accessibility built in, and the build quits and reopens the app" |
 | 3 | A build never quits a copy that holds takes (they are only in memory) | done in v5, not yet seen with takes |
+
+## 31.10.2026, v6
+
+> Please build in a scrolling bar for this application if waveforms or other user interface parts are going out of the user interface.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | A visible scroll bar whenever the takes or anything else go below the window | in progress |
