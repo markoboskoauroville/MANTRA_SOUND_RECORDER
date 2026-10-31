@@ -38,3 +38,12 @@ Appended, never rewritten. Newest last.
   copying the frames; the tick publishes the meters 30 times a second, which redraws the rows anyway.
 - **⌘ read from NSEvent.modifierFlags** at the click's end: SwiftUI's gestures have no modifier on macOS 14.
 - **Min width 600**: at 580 the device menu cut "MacBook Pro Microphone".
+
+## 31.10.2026, v4
+
+- **A tap gesture is invisible to Accessibility.** The words (QUIT, OFF, TOP…) were Text with onTapGesture: no AX
+  button, nothing to press. `axButton` gives each a label, an identifier and a default action.
+- **An app that quits inside an AX action never answers the press.** The first relaunch pressed QUIT, the app quit,
+  AXPress came back as an error and the script reported "no QUIT". Now QUIT terminates on the next turn of the main
+  loop, and relaunch.swift judges by the app being gone, not by the press's answer.
+- **The menu's Quit is the fallback**, for a copy without the button (v3 and older) or with no window open.

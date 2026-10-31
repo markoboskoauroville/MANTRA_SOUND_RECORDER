@@ -37,3 +37,5 @@ iconutil -c icns $I -o "$APP/Contents/Resources/AppIcon.icns"
 codesign --force -s "Mantra Apps" "$APP"
 rm -rf "/Applications/$NAME.app"; cp -R "$APP" /Applications/
 echo "built $APP (v$V) and installed it in /Applications"
+# v4: the running copy quit through Accessibility, the new one opened (tools/relaunch.swift); --no-run skips it
+[ "$1" = "--no-run" ] || swift tools/relaunch.swift community.auroville.mantrasoundrecorder "/Applications/$NAME.app"

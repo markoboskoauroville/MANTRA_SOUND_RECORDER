@@ -1,6 +1,6 @@
 # TAKEOVER: Mantra Sound Recorder (Mantra)
 
-**Version 3** (31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
+**Version 4** (31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
 `/Applications/Mantra Sound Recorder (Mantra).app`, bundle id `community.auroville.mantrasoundrecorder`.
 The reasons behind the choices are in [LESSONS.md](LESSONS.md).
 
@@ -29,6 +29,9 @@ Input row, each with its meter and device menu.
   at a time; each keeps its playhead. Below them the next take's empty row (red and growing while recording), then
   the record circle and "take N". Space plays / pauses the last played (or the newest).
 - **Footer**: `v1` (dim, opens the latest release), QUIT (red; quits).
+- **Accessibility**: every word or shape that acts is an Accessibility button with a label and an identifier
+  (`quit`, `off`, `top`, `close`, `permissions`, `record`, `autogain`, `take<N>`, `version`); the sliders are adjustable
+  (± 5 %). `axButton` in app/App.swift.
 - Keys: **R** record / stop, **Space** the last take, **A** auto gain.
 
 ## The model
@@ -54,13 +57,17 @@ Input row, each with its meter and device menu.
 | `app/App.swift` | the window (SwiftUI), the colours (`Ink`), keys, `--shot` and `--play-test` |
 | `app/Audio.swift` | devices, the ring, meters, recording, playing, permissions |
 | `icon/make_icon.swift` | the icon, drawn with the version under it |
-| `build.sh` | swiftc, Info.plist, icon, signed "Mantra Apps", copied to /Applications |
+| `build.sh` | swiftc, Info.plist, icon, signed "Mantra Apps", copied to /Applications, then the running copy quit and the new one opened |
+| `tools/relaunch.swift` | presses the running copy's QUIT through Accessibility (or its menu's Quit), waits for it to go, opens the new one; never kills |
 
 ## Building and testing
 
 ```sh
 ./build.sh
 ```
+
+Every build quits the running copy through Accessibility and opens the new one (Marko, 31.10.2026); the takes in
+the old copy are gone with it. `./build.sh --no-run` only builds.
 
 ```sh
 "build/Mantra Sound Recorder (Mantra).app/Contents/MacOS/MantraSoundRecorder" --shot docs/window.png 720 520

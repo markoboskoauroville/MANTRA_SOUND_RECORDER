@@ -57,5 +57,5 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Every control an Accessibility button (QUIT, OFF, TOP, ✕, PERMISSIONS, record, auto gain, each take, sliders) | in progress |
-| 2 | build.sh quits the running copy through Accessibility (QUIT, or the menu's Quit) and opens the new one | in progress |
+| 1 | Every control an Accessibility button (QUIT, OFF, TOP, ✕, PERMISSIONS, record, auto gain, each take, sliders) | done in v4 |
+| 2 | build.sh quits the running copy through Accessibility (QUIT, or the menu's Quit) and opens the new one | done in v4: measured, v2 quit by its menu, v4 by its QUIT button, the new one opened |

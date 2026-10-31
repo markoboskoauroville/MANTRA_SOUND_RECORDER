@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 3
+let VERSION = 4
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -84,19 +84,23 @@ struct TopRow: View {
                 Text("ON").foregroundStyle(Ink.green)
                 Text("OFF").foregroundStyle(Ink.grey)
                     .contentShape(Rectangle()).onTapGesture { NSApp.terminate(nil) }
+                    .axButton("Off", id: "off") { DispatchQueue.main.async { NSApp.terminate(nil) } }
                 Spacer()
                 // v3: "Just put top" (Marko, 31.10.2026)
                 Text("TOP").foregroundStyle(onTop ? Ink.green : Ink.grey)
                     .contentShape(Rectangle()).onTapGesture { onTop.toggle(); TopRow.float(onTop) }
+                    .axButton("Top", id: "top", value: onTop ? "on" : "off") { onTop.toggle(); TopRow.float(onTop) }
                     .help("Always on top: green, the window stays above every other window")
                 if !missing.isEmpty {
                     Text("PERMISSIONS").foregroundStyle(Ink.amber)
                         .contentShape(Rectangle()).onTapGesture { Permissions.openMissing() }
+                        .axButton("Permissions", id: "permissions") { Permissions.openMissing() }
                         .help("The microphone is not allowed yet: a click opens its page in System Settings")
                 }
                 Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.grey)
                     .frame(width: 28, height: 28).contentShape(Rectangle())
                     .onTapGesture { NSApp.keyWindow?.performClose(nil) }
+                    .axButton("Close window", id: "close") { (NSApp.keyWindow ?? NSApp.windows.first { $0.isVisible })?.performClose(nil) }
             }
             .font(.system(size: 12, weight: .bold, design: .monospaced))
         }
@@ -180,7 +184,7 @@ struct DeviceRow: View {
             Text(name).font(.system(size: 14)).foregroundStyle(Ink.text).frame(width: 62, alignment: .leading)
             extra
             VStack(spacing: 6) {
-                VolumeSlider(value: volume, set: setVolume).frame(height: 16)
+                VolumeSlider(label: name + " volume", value: volume, set: setVolume).frame(height: 16)
                     .help(onDevice ? "The device's own volume (the volume keys move it too)" : "This device has no volume of its own: the app's gain")
                 MeterView(m: meter).frame(height: 11)
             }
@@ -208,6 +212,7 @@ struct DeviceRow: View {
 
 /// SoundSource's slider: a green track up to the value, a white knob; a click or drag sets it.
 struct VolumeSlider: View {
+    var label = "Volume"
     let value: Float
     let set: (Float) -> Void
     var body: some View {
@@ -224,6 +229,10 @@ struct VolumeSlider: View {
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0).onChanged { v in set(Float((v.location.x - knobW / 2) / w)) })
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue("\(Int((value * 100).rounded())) %")
+        .accessibilityAdjustableAction { d in set(value + (d == .increment ? 0.05 : -0.05)) }
     }
 }
 
@@ -310,6 +319,7 @@ struct TakeRow: View {
                 Wave(peaks: t.peaks, span: t.peaks.count, played: t.frames > 0 ? t.cursor / Double(t.frames) : 0,
                      ink: on ? Ink.green : Ink.green.opacity(0.55), rest: Ink.grey, head: on || t.cursor > 0, lit: on)
                     .contentShape(Rectangle())
+                    .axButton("Take \(t.id)", id: "take\(t.id)", value: "\(on ? "playing" : "paused") \(clock(t.position)) of \(clock(t.seconds))") { r.toggle(t) }
                     .gesture(DragGesture(minimumDistance: 0).onEnded { v in
                         if NSEvent.modifierFlags.contains(.command) { r.jump(t, Double(v.location.x / max(1, g.size.width))) }
                         else { r.toggle(t) }
@@ -398,6 +408,7 @@ struct RecordKey: View {
         }
         .frame(width: 48, height: 48).contentShape(Circle())
         .onTapGesture { r.toggleRecord() }
+        .axButton("Record", id: "record", value: r.recording ? "recording" : "stopped") { r.toggleRecord() }
         .help("Record (R)")
     }
 }
@@ -431,6 +442,7 @@ struct AutoGainKey: View {
         .frame(width: 30, height: 30).contentShape(Circle())
         .opacity(r.recording ? 0.35 : 1)
         .onTapGesture { r.toggleAutoGain() }
+        .axButton("Auto gain", id: "autogain", value: "\(r.gain)") { r.toggleAutoGain() }
         .help("Auto gain (A): sing or play as loud as you will; the input is set so the loudest peak sits at -12 dB, then it stops")
     }
 }
@@ -441,10 +453,26 @@ struct Footer: View {
         HStack {
             Text("v\(VERSION)").font(.system(size: 11, design: .monospaced)).foregroundStyle(Ink.dim)
                 .onTapGesture { NSWorkspace.shared.open(RELEASES) }
+                .axButton("Version \(VERSION)", id: "version") { NSWorkspace.shared.open(RELEASES) }
             Spacer()
             Text("QUIT").font(.system(size: 12, weight: .bold, design: .monospaced)).foregroundStyle(Ink.red)
                 .contentShape(Rectangle()).onTapGesture { NSApp.terminate(nil) }
+                .axButton("Quit", id: "quit") { DispatchQueue.main.async { NSApp.terminate(nil) } }   // answer the press, then quit
         }
+    }
+}
+
+// v4 (Marko, 31.10.2026: "Make this application accessibility compatible and close it through accessibility"): every
+// word that acts is an Accessibility button with a label and an identifier, so AXPress works on it (tools/relaunch.swift
+// presses "quit"); a tap gesture alone is invisible to Accessibility.
+extension View {
+    func axButton(_ label: String, id: String, value: String? = nil, _ action: @escaping () -> Void) -> some View {
+        accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
+            .accessibilityIdentifier(id)
+            .accessibilityValue(value ?? "")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(.default, action)
     }
 }
 
