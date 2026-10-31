@@ -66,3 +66,8 @@ Appended, never rewritten. Newest last.
 
 - **OFF and QUIT did the same thing here**, and Marko chose OFF: QUIT is gone from this app and from the manifest's
   rule for new apps (swift-apps.md, "No QUIT"). The relaunch presses `off`, then `quit` for older copies, then the menu.
+
+## 31.10.2026, v8
+
+- **A warning outlives its reason.** "in memory only · gone when the app quits" was needed while nothing could be kept; with
+  SAVE on every take it was only text in the way (Marko). The rule itself stays in TAKEOVER.

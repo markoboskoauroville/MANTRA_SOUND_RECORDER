@@ -1,6 +1,6 @@
 # TAKEOVER: Mantra Sound Recorder (Mantra)
 
-**Version 7** (31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
+**Version 8** (31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
 `/Applications/Mantra Sound Recorder (Mantra).app`, bundle id `community.auroville.mantrasoundrecorder`.
 The reasons behind the choices are in [LESSONS.md](LESSONS.md).
 

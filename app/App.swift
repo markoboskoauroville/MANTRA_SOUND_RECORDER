@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 7
+let VERSION = 8
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -301,9 +301,8 @@ struct MeterView: View {
 struct TakesPanel: View {
     @ObservedObject var r: Recorder
     var body: some View {
-        Panel(title: "Takes", right: AnyView(
-            Text(r.takes.isEmpty ? "in memory only · gone when the app quits" : "\(r.takes.count) · in memory only · gone when the app quits")
-                .font(.system(size: 11)).foregroundStyle(Ink.dim))) {
+        // v8 (Marko, 31.10.2026): with SAVE on every take, "in memory only · gone when the app quits" was text too many
+        Panel(title: "Takes") {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(r.takes) { t in TakeRow(r: r, t: t) }
                 NextRow(r: r).id("next")

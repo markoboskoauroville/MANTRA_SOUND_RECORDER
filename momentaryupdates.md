@@ -100,4 +100,4 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | "in memory only · gone when the app quits" removed from the Takes panel | in progress |
+| 1 | "in memory only · gone when the app quits" removed from the Takes panel | done in v8 |
