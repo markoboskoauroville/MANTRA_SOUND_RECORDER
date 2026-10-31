@@ -50,3 +50,12 @@
 | # | Item | Status |
 |---|---|---|
 | 5 | "ON TOP" becomes "TOP" | done in v3 |
+
+## 31.10.2026, v4
+
+> Please when you make new version close this one which is running and run the new one.Why can't you quit? Make this application accessibility compatible and close it through accessibility please.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Every control an Accessibility button (QUIT, OFF, TOP, ✕, PERMISSIONS, record, auto gain, each take, sliders) | in progress |
+| 2 | build.sh quits the running copy through Accessibility (QUIT, or the menu's Quit) and opens the new one | in progress |
