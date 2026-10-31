@@ -13,3 +13,12 @@
 | 5 | Input and output drop-down menus | done in v1, waiting for Marko's test |
 | 6 | Input and output VU meters | done in v1, waiting for Marko's test |
 | 7 | The look of SoundSource (as open on screen 31.10.2026) | done in v1, waiting for Marko's test |
+
+## 31.10.2026, v2
+
+> I clicked permissions, now it's recording. The permissions become invisible once permissions are set. This is for every of my app. Permission is only visible on a screen when permissions are not set, so user can click on it. In this application I am missing the controlling input and output volume. And that's all. Please build it.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | PERMISSIONS visible only while a permission is missing, in every app (already the rule: MANTRA_MANIFEST swift-apps.md; v1 does it) | check |
+| 2 | Input volume and output volume controls | in progress |
