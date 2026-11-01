@@ -118,5 +118,5 @@
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Auto gain may push the gain above 100 % when the device's volume is at its top | in progress |
-| 2 | The name Sound Recorder (Mantra) everywhere | in progress |
+| 1 | Auto gain may push the gain above 100 % when the device's volume is at its top | done in v10: up to 1000 % (+20 dB boost after the volume); measured on BlackHole -38.8 → -12.0 dB at 251 % |
+| 2 | The name Sound Recorder (Mantra) everywhere | done: the app was renamed in v9; v10 fixes the last place, the window's title (was "Mantra Sound Recorder") |

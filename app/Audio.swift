@@ -257,6 +257,11 @@ final class Recorder: ObservableObject {
     @Published private(set) var outOnDevice = false
     private var inWatch: VolumeWatch?, outWatch: VolumeWatch?
     private var inSoft: Float = 1, outSoft: Float = 1
+    // v10 (Marko, 1.11.2026: "gain can be above 100% while using the auto gain"): the app's own boost on top of the
+    // input's volume, 1 = none, up to maxBoost (+20 dB). Only the auto gain raises it, once the volume is at its top;
+    // the slider moved by hand puts it back to 1. The input reads as volume × boost: 100 % … 1000 %.
+    @Published private(set) var inBoost: Float = 1
+    static let maxBoost: Float = 10
     // read by the audio threads: plain flags, not the watch objects
     private var inOnDeviceFlag = false, outOnDeviceFlag = false
 
@@ -287,6 +292,7 @@ final class Recorder: ObservableObject {
         outUID = pick(d.string(forKey: "output"), outputs, Devices.defaultDevice(input: false))
         if d.object(forKey: "inGain") != nil { inSoft = d.float(forKey: "inGain") }
         if d.object(forKey: "outGain") != nil { outSoft = d.float(forKey: "outGain") }
+        if d.object(forKey: "inBoost") != nil { inBoost = min(max(d.float(forKey: "inBoost"), 1), Self.maxBoost) }
         watchVolumes()
         timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(timer!, forMode: .common)
@@ -338,18 +344,32 @@ final class Recorder: ObservableObject {
     func setVolume(input: Bool, _ v: Float) {
         let v = min(max(v, 0), 1)
         if input {
-            if let w = inWatch { w.set(v) } else { inSoft = v; if live { UserDefaults.standard.set(v, forKey: "inGain") } }
-            inVolume = v
+            setBoost(1)                                   // by hand: the slider is the whole gain again
+            setInput(v)
         } else {
             if let w = outWatch { w.set(v) } else { outSoft = v; if live { UserDefaults.standard.set(v, forKey: "outGain") } }
             outVolume = v
         }
     }
 
+    private func setInput(_ v: Float) {
+        if let w = inWatch { w.set(v) } else { inSoft = v; if live { UserDefaults.standard.set(v, forKey: "inGain") } }
+        inVolume = v
+    }
+
+    func setBoost(_ b: Float) {
+        inBoost = min(max(b, 1), Self.maxBoost)
+        if live { UserDefaults.standard.set(inBoost, forKey: "inBoost") }
+    }
+
+    /// the input's whole gain as the window shows it: the volume times the boost
+    var inPercent: Int { Int((inVolume * inBoost * 100).rounded()) }
+
     // ---------------------------------------------------------------- choosing
     func chooseInput(_ uid: String) {
         guard uid != inUID, !recording else { return }
         stopAutoGain()
+        setBoost(1)
         inUID = uid
         if live { UserDefaults.standard.set(uid, forKey: "input") }
         watchVolumes()
@@ -412,7 +432,7 @@ final class Recorder: ObservableObject {
                     } else {
                         for i in 0..<n { l[i] = d0[i]; r[i] = d0[i] }     // a mono microphone: the same on both sides
                     }
-                    let g = self.inOnDeviceFlag ? 1 : self.inSoft
+                    let g = (self.inOnDeviceFlag ? 1 : self.inSoft) * self.inBoost
                     if g != 1 { for i in 0..<n { l[i] *= g; r[i] *= g } }
                     for i in 0..<n { pl = max(pl, abs(l[i])); pr = max(pr, abs(r[i])) }
                     self.ring.write(l.baseAddress!, r.baseAddress!, n)
@@ -623,25 +643,39 @@ final class Recorder: ObservableObject {
 
     private func failGain(_ why: String) { gain = .failed; gStart = Date(); gainNote = "AUTO GAIN: " + why }
 
-    /// moves the input by `delta` dB; false when it cannot move further that way
+    /// moves the input by `delta` dB; false when it cannot move further that way. Up: the volume to its top first,
+    /// then the boost (v10). Down: the boost back to 1 first, then the volume.
     private func nudgeInput(_ delta: Float) -> Bool {
-        if let w = inWatch {
-            if let db = w.decibels, let range = w.dbRange {
-                let to = min(max(db + delta, range.0), range.1)
-                if abs(to - db) < 0.2 { return false }
-                w.setDecibels(to)
-            } else {
-                let v = w.value, nv = min(max(v * pow(10, delta / 20), 0), 1)
-                if abs(nv - v) < 0.004 { return false }
-                w.set(nv)
-            }
-            inVolume = w.value
-        } else {
-            let nv = min(max(inSoft * pow(10, delta / 20), 0), 1)
-            if abs(nv - inSoft) < 0.004 { return false }
-            setVolume(input: true, nv)
+        var left = delta, moved = false
+        if left < 0, inBoost > 1 {
+            let b = max(inBoost * pow(10, left / 20), 1)
+            left -= 20 * log10(b / inBoost); setBoost(b); moved = true
         }
-        return true
+        if abs(left) >= 0.2 {
+            let used = nudgeVolume(left)
+            if used != 0 { moved = true; left -= used }
+        }
+        if left >= 0.2, inBoost < Self.maxBoost {
+            let b = min(inBoost * pow(10, left / 20), Self.maxBoost)
+            if b - inBoost > 0.004 { setBoost(b); moved = true }
+        }
+        return moved
+    }
+
+    /// moves the input's volume (the device's, or the app's gain up to 100 %); the dB it really moved
+    private func nudgeVolume(_ delta: Float) -> Float {
+        if let w = inWatch, let db = w.decibels, let range = w.dbRange {
+            let to = min(max(db + delta, range.0), range.1)
+            if abs(to - db) < 0.2 { return 0 }
+            w.setDecibels(to); inVolume = w.value
+            return to - db
+        }
+        let v = inWatch?.value ?? inSoft
+        let nv = min(max((v > 0 ? v : 0.01) * pow(10, delta / 20), 0), 1)
+        if abs(nv - v) < 0.004 { return 0 }
+        setInput(nv)
+        if let w = inWatch { inVolume = w.value }
+        return v > 0 && nv > 0 ? 20 * log10(nv / v) : delta
     }
 
     private func stepAutoGain(_ peakNow: Float) {
@@ -659,11 +693,11 @@ final class Recorder: ObservableObject {
             let delta = Self.gainTarget - gPeak
             if abs(delta) <= 1.5 {
                 gain = .done; gStart = now
-                gainNote = String(format: "AUTO GAIN: set, the loudest peak at %.1f dB, the input at %d %%", gPeak, Int((inVolume * 100).rounded()))
+                gainNote = String(format: "AUTO GAIN: set, the loudest peak at %.1f dB, the input at %d %%", gPeak, inPercent)
             } else if gRound >= 8 {
                 failGain("the level would not settle; try again")
             } else if !nudgeInput(delta) {
-                failGain(delta > 0 ? "too quiet even at 100 %: closer to the microphone" : "too loud even at the lowest volume")
+                failGain(delta > 0 ? "too quiet even at \(Int(Self.maxBoost * 100)) %: closer to the microphone" : "too loud even at the lowest volume")
             } else {
                 gRound += 1; gPeak = -90; gStart = now.addingTimeInterval(0.3)
             }
@@ -719,7 +753,8 @@ final class Recorder: ObservableObject {
     }
 
     /// for the picture only: take `id` as if playing at `fraction`, the meters showing these levels
-    func pose(playing id: Int, at fraction: Double, inDB: (Float, Float), outDB: (Float, Float), gain g: GainStep = .idle) {
+    func pose(playing id: Int, at fraction: Double, inDB: (Float, Float), outDB: (Float, Float), gain g: GainStep = .idle, boost: Float = 1) {
+        inBoost = boost
         if let t = takes.first(where: { $0.id == id }) { t.cursor = fraction * Double(t.frames); playingID = id }
         inMeter = Meter(l: inDB.0, r: inDB.1, holdL: inDB.0 + 3, holdR: inDB.1 + 2)
         outMeter = Meter(l: outDB.0, r: outDB.1, holdL: outDB.0 + 2, holdR: outDB.1 + 4)

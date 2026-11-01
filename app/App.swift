@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 9
+let VERSION = 10
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -103,7 +103,7 @@ struct TopRow: View {
     @AppStorage("onTop") private var onTop = false
     var body: some View {
         ZStack {
-            (Text("Mantra Sound").fontWeight(.bold) + Text(" Recorder").fontWeight(.regular))
+            (Text("Sound Recorder").fontWeight(.bold) + Text(" (Mantra)").fontWeight(.regular))
                 .font(.system(size: 15)).foregroundStyle(Ink.text)
             HStack(spacing: 10) {
                 Spacer().frame(width: 64)                   // the traffic lights
@@ -174,7 +174,7 @@ struct DevicesPanel: View {
                       devices: r.outputs, uid: r.outUID, enabled: true, fill: Ink.rowGrey,
                       extra: AnyView(Color.clear.frame(width: 30, height: 30))) { r.chooseOutput($0) }
             DeviceRow(icon: "mic.fill", name: "Input", meter: r.inMeter,
-                      volume: r.inVolume, onDevice: r.inOnDevice, setVolume: { r.setVolume(input: true, $0) },
+                      volume: r.inVolume, boost: r.inBoost, onDevice: r.inOnDevice, setVolume: { r.setVolume(input: true, $0) },
                       devices: r.inputs, uid: r.inUID, enabled: !r.recording, fill: Ink.rowGreen,
                       extra: AnyView(AutoGainKey(r: r))) { r.chooseInput($0) }
             if let n = r.gainNote {
@@ -194,6 +194,7 @@ struct DeviceRow: View {
     let icon: String, name: String
     let meter: Meter
     let volume: Float
+    var boost: Float = 1
     let onDevice: Bool
     let setVolume: (Float) -> Void
     let devices: [Device]
@@ -216,7 +217,9 @@ struct DeviceRow: View {
             }
             .frame(minWidth: 80)
             VStack(alignment: .trailing, spacing: 5) {
-                Text("\(Int((volume * 100).rounded())) %").font(.system(size: 12, weight: .semibold, design: .monospaced))
+                Text("\(Int((volume * boost * 100).rounded())) %").font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(boost > 1.001 ? Ink.amber : Ink.text)
+                    .help(boost > 1.001 ? String(format: "Above 100 %%: the auto gain's boost, +%.1f dB on top of the volume; move the slider to take it off", 20 * log10(boost)) : "")
                 Text(readout).font(.system(size: 10, design: .monospaced)).foregroundStyle(Ink.dim)
             }
             .foregroundStyle(Ink.text).frame(width: 64, alignment: .trailing)
@@ -588,7 +591,7 @@ enum Main {
         r.addTestTake(seconds: 6)
         r.addTestTake(seconds: 4.5, hz: 330, shape: 2.6)
         r.addTestTake(seconds: 7, hz: 520, shape: 1.1)
-        r.pose(playing: 2, at: 0.42, inDB: (-21, -24), outDB: (-13, -15), gain: .adjusting)
+        r.pose(playing: 2, at: 0.42, inDB: (-21, -24), outDB: (-13, -15), gain: .adjusting, boost: 2.51)
         let v = NSHostingView(rootView: Root(r: r))
         v.frame = NSRect(x: 0, y: 0, width: w, height: h)
         let win = NSWindow(contentRect: v.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -614,8 +617,13 @@ enum Main {
         let r = Recorder(live: true)
         defer { if let v = savedIn { d.set(v, forKey: "input") } else { d.removeObject(forKey: "input") } }
         guard r.chooseInput(named: name) else { print("no input named \(name)"); return false }
-        let before = r.inputVolumeOnDevice
-        defer { if let v = before { r.setInputVolumeOnDevice(v) }; r.forget() }
+        let before = r.inputVolumeOnDevice, boostBefore = r.inBoost, softBefore = d.object(forKey: "inGain")
+        defer {
+            if let v = before { r.setInputVolumeOnDevice(v) }
+            r.setBoost(boostBefore)
+            if let v = softBefore { d.set(v, forKey: "inGain") } else { d.removeObject(forKey: "inGain") }
+            r.forget()
+        }
         print("input \(r.inputName), volume before \(before.map { String(format: "%.3f", $0) } ?? "none (app gain)")")
         RunLoop.main.run(until: Date().addingTimeInterval(0.5))
         r.toggleAutoGain()
@@ -623,7 +631,7 @@ enum Main {
         let end = Date().addingTimeInterval(40)
         while Date() < end {
             RunLoop.main.run(until: Date().addingTimeInterval(0.1))
-            let line = "\(r.gain) \(String(format: "%.3f", r.inVolume)) \(r.gainNote ?? "")"
+            let line = "\(r.gain) \(String(format: "%.3f", r.inVolume)) \(r.inPercent) % \(r.gainNote ?? "")"
             if line != last { print(String(format: "%5.1f dB  ", r.inMeter.holdL) + line); last = line }
             if r.gain == .done || r.gain == .failed { break }
         }

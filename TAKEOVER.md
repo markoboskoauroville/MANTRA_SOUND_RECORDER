@@ -24,6 +24,9 @@ Input row, each with its meter and device menu.
   device says its dB range, otherwise the scalar or the app's gain) until that peak is within 1.5 dB of -12 dBFS
   (up to 8 rounds); then a green ✓ for 4 s and it is off. ! and an amber line when it fails. A line under the rows
   says what it is doing.
+- **Above 100 % (v10, 1.11.2026):** when the input's volume is at its top and the peak is still under -12 dB, the auto
+  gain adds the app's own boost, up to +20 dB (1000 %). The readout shows volume × boost in amber (e.g. 251 %); going
+  down, the boost goes first. Moving the Input slider by hand takes the boost off. Saved in defaults as `inBoost`.
 - **Takes**: every recording of the session is its own waveform, numbered, oldest on top, with `position / length`.
   **A click on a waveform plays / pauses it** (there is no play key); **⌘-click jumps there and plays**. **SAVE** in each waveform's upper right corner opens a save dialog (the last
   folder, at first ~/Music; name "Take N - d.M.yyyy HH.mm.wav") and writes WAV, stereo, 24 bit, at the take's rate;
@@ -98,7 +101,8 @@ whose name contains the word and never changes the saved choice. Test audio goes
   take because BlackHole's own volume slider attenuates (seen before in Spectral Analyzer).
 - SAVE's dialog not yet used by a hand (the writer was measured: 2 ch, 48 kHz, 24 bit, 3.00 s). The relaunch's
   "holds takes, not quit" path has not yet met a copy with takes.
-- Auto gain measured on BlackHole only (31.10.2026: -21.9 → -12.0 dB in one round); not yet on a voice, where the
+- Auto gain measured on BlackHole only (31.10.2026: -21.9 → -12.0 dB in one round; v10, 1.11.2026: a -20 dBFS tone
+  arriving at -38.8 dB → -12.0 dB at 251 %, the volume to its top and +8 dB boost); not yet on a voice, where the
   2 s window may need to be longer.
 - v2 volume sliders not yet moved by a hand; the ADAM read back 88 % as SoundSource shows.
 - Not tried: device unplugged during recording or playing, devices with more than two channels, a take of more
