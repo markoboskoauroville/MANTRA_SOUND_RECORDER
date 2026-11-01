@@ -107,3 +107,8 @@
 > This project is gone, please close it.
 
 **Status:** closed at v8, 31.10.2026. Everything pushed; the lessons are in MANTRA_MANIFEST lessons-learned.md.
+
+## 1.11.2026: no Mantra at the beginning of the name
+> "second point, please look at the screenshot at the top. I have applications which have Mantra at the beginning, right? In the manifest, the Mantra manifest never ever names apps with Mantra at the beginning. Mantra always comes at the end in parentheses, and in the beginning is a normal name of the app without the Mantra prefix Which means you need to go through all my apps, and anything called Mantra at the beginning should be renamed."
+
+**Status:** in progress.
