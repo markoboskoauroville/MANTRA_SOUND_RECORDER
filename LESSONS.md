@@ -71,3 +71,17 @@ Appended, never rewritten. Newest last.
 
 - **A warning outlives its reason.** "in memory only · gone when the app quits" was needed while nothing could be kept; with
   SAVE on every take it was only text in the way (Marko). The rule itself stays in TAKEOVER.
+
+## 1.11.2026, v10 and v11
+
+- **Percent is not a unit for gain.** v10 showed the auto gain's boost as 251 %; Marko: a percentage is a "material" unit,
+  the peak goes to -12 dB, so the gain is read in dB. Every level, readout and message is in dB now.
+- **The slider is the indicator.** A slider that is linear in volume hides where the gain really is; v11 makes the slider
+  a dB scale (-60 … 0 mark … +32 dB) computed from the gain itself, so the auto gain moving the level moves the knob.
+  Measured round trip: positions 0.2/0.5/0.652/0.8/1.0 ↔ -41.6/-14.0/0.0/+13.6/+32.0 dB.
+- **The ceiling is his to set.** v10 capped the boost at +20 dB on my own guess; he set it at +32 dB above 0 dB, reachable
+  by hand as well as by the auto gain. Ask or take the gear's number (the CQ), don't invent a limit.
+- **BlackHole's input volume at 71 % costs ~19 dB**, and the auto gain listens only above -45 dB: a -40 or -30 dBFS test
+  tone never woke it. -25 dBFS (arriving -43.8 dB) is the quietest test that still needs the boost (+13 dB).
+- **My slip:** a Python slice ending at the first "    }\n" matched inside a deeper "        }\n" and left a stray brace;
+  cut by a marker line, not by an indentation fragment.
