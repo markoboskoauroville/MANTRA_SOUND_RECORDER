@@ -1,10 +1,10 @@
 #!/bin/sh
-# build.sh: Mantra Sound Recorder (Mantra).app, swiftc straight, no Xcode, signed "Mantra Apps"
+# build.sh: Sound Recorder (Mantra).app, swiftc straight, no Xcode, signed "Mantra Apps"
 # (MANTRA_MANIFEST mac-app-signing.md), installed in /Applications (swift-apps.md).
 set -e
 cd "$(dirname "$0")"
 V=$(sed -n 's/^let VERSION = \([0-9]*\)/\1/p' app/App.swift)
-NAME="Mantra Sound Recorder (Mantra)"
+NAME="Sound Recorder (Mantra)"
 APP="build/$NAME.app"
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 swiftc -O -swift-version 5 -parse-as-library -o "$APP/Contents/MacOS/MantraSoundRecorder" app/*.swift 2>&1 | grep -v "warning:" || true
@@ -23,7 +23,7 @@ cat > "$APP/Contents/Info.plist" <<PL
 <key>CFBundleVersion</key><string>$V</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
-<key>NSMicrophoneUsageDescription</key><string>Mantra Sound Recorder records the input you choose. The recording stays in memory and is gone when the app quits.</string>
+<key>NSMicrophoneUsageDescription</key><string>Sound Recorder (Mantra) records the input you choose. The recording stays in memory and is gone when the app quits.</string>
 </dict></plist>
 PL
 # the icon, drawn with the version under it

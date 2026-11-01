@@ -1,7 +1,7 @@
-# TAKEOVER: Mantra Sound Recorder (Mantra)
+# TAKEOVER: Sound Recorder (Mantra)
 
 **Version 8** (31.10.2026) · **closed by Marko 31.10.2026** · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
-`/Applications/Mantra Sound Recorder (Mantra).app`, bundle id `community.auroville.mantrasoundrecorder`.
+`/Applications/Sound Recorder (Mantra).app`, bundle id `community.auroville.mantrasoundrecorder`.
 The reasons behind the choices are in [LESSONS.md](LESSONS.md).
 
 ## What it is
@@ -74,15 +74,15 @@ Every build quits the running copy through Accessibility and opens the new one (
 copy holds takes: then it is left running and says so (exit 3). `./build.sh --no-run` only builds.
 
 ```sh
-"build/Mantra Sound Recorder (Mantra).app/Contents/MacOS/MantraSoundRecorder" --shot docs/window.png 720 520
+"build/Sound Recorder (Mantra).app/Contents/MacOS/MantraSoundRecorder" --shot docs/window.png 720 520
 ```
 
 ```sh
-"build/Mantra Sound Recorder (Mantra).app/Contents/MacOS/MantraSoundRecorder" --play-test BlackHole
+"build/Sound Recorder (Mantra).app/Contents/MacOS/MantraSoundRecorder" --play-test BlackHole
 ```
 
 ```sh
-"build/Mantra Sound Recorder (Mantra).app/Contents/MacOS/MantraSoundRecorder" --gain-test BlackHole
+"build/Sound Recorder (Mantra).app/Contents/MacOS/MantraSoundRecorder" --gain-test BlackHole
 ```
 
 `--save-test <file.wav>` writes a 3 s test take through the SAVE writer. `--gain-test` runs the auto gain on that input (play a tone into it with sox first) and puts its volume back.

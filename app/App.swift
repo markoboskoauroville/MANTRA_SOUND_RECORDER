@@ -1,4 +1,4 @@
-// Mantra Sound Recorder (Mantra): record, play, see the waveform; the take is gone when the app quits.
+// Sound Recorder (Mantra): record, play, see the waveform; the take is gone when the app quits.
 //
 // Marko, 31.10.2026: "SoundSource which is now open on the screen should be user interface for audio input and audio
 // output and audio input and audio output VU meters. And overall look." So the window is SoundSource's: a dark
@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 8
+let VERSION = 9
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -135,7 +135,7 @@ struct TopRow: View {
     }
 
     static func float(_ on: Bool) {
-        for w in NSApp.windows where w.contentView is NSHostingView<Root> || w.title.hasPrefix("Mantra Sound Recorder") {
+        for w in NSApp.windows where w.contentView is NSHostingView<Root> || w.title.hasPrefix("Sound Recorder (Mantra)") {
             w.level = on ? .floating : .normal
         }
     }
@@ -544,7 +544,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
 struct RecorderApp: App {
     @NSApplicationDelegateAdaptor(Delegate.self) var delegate
     var body: some Scene {
-        WindowGroup("Mantra Sound Recorder (Mantra)") { Root(r: REC) }
+        WindowGroup("Sound Recorder (Mantra)") { Root(r: REC) }
             .windowStyle(.hiddenTitleBar)
             .windowResizability(.contentMinSize)
             .defaultSize(width: 720, height: 540)

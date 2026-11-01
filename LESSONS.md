@@ -1,4 +1,4 @@
-# LESSONS: Mantra Sound Recorder
+# LESSONS: Sound Recorder (Mantra)
 
 Appended, never rewritten. Newest last.
 

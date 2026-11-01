@@ -1,4 +1,4 @@
-# Mantra Sound Recorder (Mantra)
+# Sound Recorder (Mantra)
 
 ```sh
 git clone https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER && cd MANTRA_SOUND_RECORDER && ./build.sh
