@@ -132,3 +132,9 @@
 | 2 | Up to +32 dB above 0 dB | done in v11: the boost now reaches +32 dB |
 | 3 | The slider reaches the boost by hand | done in v11: right of the 0 dB mark is the boost, in amber |
 | 4 | The slider is a dB indicator | done in v11: -60 dB … 0 (mark) … +32 dB, linear in dB; measured round trip 0.2/0.5/0.652/0.8/1.0 → -41.6/-14.0/0.0/+13.6/+32.0 dB → the same positions; auto gain on BlackHole -43.8 → -12.0 dB at +13.0 dB, the slider following |
+
+## 1.11.2026, closed
+
+> close project
+
+**Status:** closed at v11, 1.11.2026. Everything pushed; the lessons are in LESSONS.md and MANTRA_MANIFEST lessons-learned.md. Not yet tried: the auto gain on Marko's voice.
