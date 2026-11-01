@@ -24,9 +24,11 @@ Input row, each with its meter and device menu.
   device says its dB range, otherwise the scalar or the app's gain) until that peak is within 1.5 dB of -12 dBFS
   (up to 8 rounds); then a green ✓ for 4 s and it is off. ! and an amber line when it fails. A line under the rows
   says what it is doing.
-- **Above 100 % (v10, 1.11.2026):** when the input's volume is at its top and the peak is still under -12 dB, the auto
-  gain adds the app's own boost, up to +20 dB (1000 %). The readout shows volume × boost in amber (e.g. 251 %); going
-  down, the boost goes first. Moving the Input slider by hand takes the boost off. Saved in defaults as `inBoost`.
+- **Above 0 dB (v10, v11, 1.11.2026):** everything is in dB, never %. The sliders are dB scales, linear in dB:
+  -60 dB at the left (far left = silence) up to the device's top; the Input slider goes on past a 0 dB mark into the
+  app's own boost, to +32 dB (amber). The auto gain raises the volume to its top first, then the boost; down, the
+  boost goes first. The slider is the indicator: it follows the auto gain. Boost saved in defaults as `inBoost`.
+  `--slider-test <input>` sets positions and reads the dB back.
 - **Takes**: every recording of the session is its own waveform, numbered, oldest on top, with `position / length`.
   **A click on a waveform plays / pauses it** (there is no play key); **⌘-click jumps there and plays**. **SAVE** in each waveform's upper right corner opens a save dialog (the last
   folder, at first ~/Music; name "Take N - d.M.yyyy HH.mm.wav") and writes WAV, stereo, 24 bit, at the take's rate;

@@ -258,10 +258,39 @@ final class Recorder: ObservableObject {
     private var inWatch: VolumeWatch?, outWatch: VolumeWatch?
     private var inSoft: Float = 1, outSoft: Float = 1
     // v10 (Marko, 1.11.2026: "gain can be above 100% while using the auto gain"): the app's own boost on top of the
-    // input's volume, 1 = none, up to maxBoost (+20 dB). Only the auto gain raises it, once the volume is at its top;
-    // the slider moved by hand puts it back to 1. The input reads as volume × boost: 100 % … 1000 %.
+    // input's volume, 1 = none, up to maxBoost (v11: +32 dB). The auto gain raises it once the volume is at its top,
+    // and the slider right of its 0 dB mark. Shown in dB (v11), never in %.
     @Published private(set) var inBoost: Float = 1
-    static let maxBoost: Float = 10
+    // v11 (Marko, 1.11.2026: "maximum ... over the scale of 0 dB is 32 dB ... and I can do it also with the slider")
+    static let maxBoostDB: Float = 32
+    static let maxBoost: Float = pow(10, maxBoostDB / 20)
+    /// v11 (Marko, 1.11.2026: "slider always reflects ... the level of dBs. It's an indicator"): the sliders are a dB
+    /// scale, -60 dB at the left (the far left is silence), the device's top, then for the input the boost to +32 dB.
+    static let sliderLow: Float = -60
+    private func devTopDB(input: Bool) -> Float { ((input ? inWatch : outWatch)?.dbRange?.1) ?? 0 }
+    func sliderHigh(input: Bool) -> Float { input ? max(Self.maxBoostDB, devTopDB(input: true)) : devTopDB(input: false) }
+    /// where the 0 dB mark sits on the slider (only the input has room above it)
+    var inZeroAt: Float { (0 - Self.sliderLow) / (sliderHigh(input: true) - Self.sliderLow) }
+    func sliderPos(input: Bool) -> Float {
+        guard let d = gainDB(input: input) else { return 0 }
+        return min(max((d - Self.sliderLow) / (sliderHigh(input: input) - Self.sliderLow), 0), 1)
+    }
+    func setSlider(input: Bool, _ p: Float) {
+        let p = min(max(p, 0), 1)
+        let w = input ? inWatch : outWatch
+        if p < 0.005 { if input { setBoost(1) }; setVolume(input: input, 0); return }
+        let db = Self.sliderLow + p * (sliderHigh(input: input) - Self.sliderLow)
+        let top = devTopDB(input: input)
+        let devDB = min(db, top)
+        if input { setBoost(pow(10, min(max(db - top, 0), Self.maxBoostDB) / 20)) }
+        if let w = w, let r = w.dbRange, w.decibels != nil {
+            w.setDecibels(min(max(devDB, r.0), r.1))
+            if input { inVolume = w.value } else { outVolume = w.value }
+        } else {
+            let v = min(pow(10, devDB / 20), 1)
+            if input { setInput(v) } else { setVolume(input: false, v) }
+        }
+    }
     // read by the audio threads: plain flags, not the watch objects
     private var inOnDeviceFlag = false, outOnDeviceFlag = false
 
@@ -362,8 +391,20 @@ final class Recorder: ObservableObject {
         if live { UserDefaults.standard.set(inBoost, forKey: "inBoost") }
     }
 
-    /// the input's whole gain as the window shows it: the volume times the boost
-    var inPercent: Int { Int((inVolume * inBoost * 100).rounded()) }
+    /// v11 (Marko, 1.11.2026: "convert percentage ... to dB"): the whole gain in dB as the window shows it, the device's
+    /// own dB when it says them (else 20·log10 of the volume), plus the boost; nil = silent (−∞)
+    func gainDB(input: Bool) -> Float? {
+        let w = input ? inWatch : outWatch, v = input ? inVolume : outVolume
+        let base: Float? = w?.decibels ?? (v > 0.0001 ? 20 * log10(v) : nil)
+        guard let b = base else { return nil }
+        return b + (input ? 20 * log10(inBoost) : 0)
+    }
+    var inGainText: String { Self.dbText(gainDB(input: true)) }
+    static func dbText(_ d: Float?) -> String {
+        guard let d = d else { return "−∞ dB" }
+        let r = (d * 10).rounded() / 10
+        return r == 0 ? "0.0 dB" : String(format: "%@%.1f dB", r > 0 ? "+" : "−", abs(r))
+    }
 
     // ---------------------------------------------------------------- choosing
     func chooseInput(_ uid: String) {
@@ -693,11 +734,11 @@ final class Recorder: ObservableObject {
             let delta = Self.gainTarget - gPeak
             if abs(delta) <= 1.5 {
                 gain = .done; gStart = now
-                gainNote = String(format: "AUTO GAIN: set, the loudest peak at %.1f dB, the input at %d %%", gPeak, inPercent)
+                gainNote = String(format: "AUTO GAIN: set, the loudest peak at %.1f dB, the input gain %@", gPeak, inGainText)
             } else if gRound >= 8 {
                 failGain("the level would not settle; try again")
             } else if !nudgeInput(delta) {
-                failGain(delta > 0 ? "too quiet even at \(Int(Self.maxBoost * 100)) %: closer to the microphone" : "too loud even at the lowest volume")
+                failGain(delta > 0 ? "too quiet even with the +32 dB boost: closer to the microphone" : "too loud even at the lowest volume")
             } else {
                 gRound += 1; gPeak = -90; gStart = now.addingTimeInterval(0.3)
             }

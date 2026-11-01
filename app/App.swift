@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 10
+let VERSION = 11
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -170,11 +170,11 @@ struct DevicesPanel: View {
             Text("Device").frame(width: 230)
         }.font(.system(size: 11)).foregroundStyle(Ink.dim).padding(.leading, 160))) {
             DeviceRow(icon: "speaker.wave.2.fill", name: "Output", meter: r.outMeter,
-                      volume: r.outVolume, onDevice: r.outOnDevice, setVolume: { r.setVolume(input: false, $0) },
+                      volume: r.sliderPos(input: false), gain: r.gainDB(input: false), onDevice: r.outOnDevice, setVolume: { r.setSlider(input: false, $0) },
                       devices: r.outputs, uid: r.outUID, enabled: true, fill: Ink.rowGrey,
                       extra: AnyView(Color.clear.frame(width: 30, height: 30))) { r.chooseOutput($0) }
             DeviceRow(icon: "mic.fill", name: "Input", meter: r.inMeter,
-                      volume: r.inVolume, boost: r.inBoost, onDevice: r.inOnDevice, setVolume: { r.setVolume(input: true, $0) },
+                      volume: r.sliderPos(input: true), boost: r.inBoost, gain: r.gainDB(input: true), zeroAt: r.inZeroAt, onDevice: r.inOnDevice, setVolume: { r.setSlider(input: true, $0) },
                       devices: r.inputs, uid: r.inUID, enabled: !r.recording, fill: Ink.rowGreen,
                       extra: AnyView(AutoGainKey(r: r))) { r.chooseInput($0) }
             if let n = r.gainNote {
@@ -195,6 +195,8 @@ struct DeviceRow: View {
     let meter: Meter
     let volume: Float
     var boost: Float = 1
+    var gain: Float? = nil
+    var zeroAt: Float? = nil
     let onDevice: Bool
     let setVolume: (Float) -> Void
     let devices: [Device]
@@ -211,15 +213,15 @@ struct DeviceRow: View {
             Text(name).font(.system(size: 14)).foregroundStyle(Ink.text).frame(width: 62, alignment: .leading)
             extra
             VStack(spacing: 6) {
-                VolumeSlider(label: name + " volume", value: volume, set: setVolume).frame(height: 16)
+                VolumeSlider(label: name + " volume", value: volume, zeroAt: zeroAt, set: setVolume).frame(height: 16)
                     .help(onDevice ? "The device's own volume (the volume keys move it too)" : "This device has no volume of its own: the app's gain")
                 MeterView(m: meter).frame(height: 11)
             }
             .frame(minWidth: 80)
             VStack(alignment: .trailing, spacing: 5) {
-                Text("\(Int((volume * boost * 100).rounded())) %").font(.system(size: 12, weight: .semibold, design: .monospaced))
+                Text(Recorder.dbText(gain)).font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(boost > 1.001 ? Ink.amber : Ink.text)
-                    .help(boost > 1.001 ? String(format: "Above 100 %%: the auto gain's boost, +%.1f dB on top of the volume; move the slider to take it off", 20 * log10(boost)) : "")
+                    .help(boost > 1.001 ? String(format: "The gain: +%.1f dB of boost on top of the volume (the slider right of the 0 dB mark, up to +32 dB)", 20 * log10(boost)) : "The gain in dB")
                 Text(readout).font(.system(size: 10, design: .monospaced)).foregroundStyle(Ink.dim)
             }
             .foregroundStyle(Ink.text).frame(width: 64, alignment: .trailing)
@@ -243,6 +245,7 @@ struct DeviceRow: View {
 struct VolumeSlider: View {
     var label = "Volume"
     let value: Float
+    var zeroAt: Float? = nil                     // v11: the 0 dB mark; right of it the boost, in amber
     let set: (Float) -> Void
     var body: some View {
         GeometryReader { g in
@@ -250,7 +253,15 @@ struct VolumeSlider: View {
             let x = w * CGFloat(min(max(value, 0), 1))
             ZStack(alignment: .leading) {
                 Capsule().fill(Ink.well).frame(height: 5).padding(.horizontal, knobW / 2)
-                Capsule().fill(Ink.green).frame(width: x + knobW / 2, height: 5)
+                if let z = zeroAt, value > z {
+                    Capsule().fill(Ink.amber).frame(width: x + knobW / 2, height: 5)
+                    Capsule().fill(Ink.green).frame(width: w * CGFloat(z) + knobW / 2, height: 5)
+                } else {
+                    Capsule().fill(Ink.green).frame(width: x + knobW / 2, height: 5)
+                }
+                if let z = zeroAt {
+                    Rectangle().fill(Ink.text.opacity(0.7)).frame(width: 1.5, height: 13).offset(x: w * CGFloat(z) + knobW / 2)
+                }
                 RoundedRectangle(cornerRadius: 5).fill(Color.white).frame(width: knobW, height: 14)
                     .shadow(color: .black.opacity(0.4), radius: 1, y: 1).offset(x: x)
             }
@@ -260,7 +271,7 @@ struct VolumeSlider: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
-        .accessibilityValue("\(Int((value * 100).rounded())) %")
+        .accessibilityValue(String(format: "%.0f %%  of the scale", value * 100))
         .accessibilityAdjustableAction { d in set(value + (d == .increment ? 0.05 : -0.05)) }
     }
 }
@@ -576,6 +587,21 @@ enum Main {
             do { try Recorder.writeWAV(r.addTestTake(seconds: 3), to: URL(fileURLWithPath: a[i + 1])); exit(0) }
             catch { print(error); exit(1) }
         }
+        if let i = a.firstIndex(of: "--slider-test"), i + 1 < a.count {
+            // the Input slider as a dB indicator: position → dB → position, the volume and boost put back
+            let d = UserDefaults.standard, savedIn = d.string(forKey: "input"), soft = d.object(forKey: "inGain")
+            let r = Recorder(live: true)
+            guard r.chooseInput(named: a[i + 1]) else { exit(1) }
+            let before = r.inputVolumeOnDevice, boost = r.inBoost
+            for p: Float in [0.2, 0.5, r.inZeroAt, 0.8, 1.0] {
+                r.setSlider(input: true, p)
+                print(String(format: "set %.3f → %@ → slider %.3f", p, r.inGainText, r.sliderPos(input: true)))
+            }
+            if let v = before { r.setInputVolumeOnDevice(v) }; r.setBoost(boost)
+            if let v = savedIn { d.set(v, forKey: "input") } else { d.removeObject(forKey: "input") }
+            if let v = soft { d.set(v, forKey: "inGain") } else { d.removeObject(forKey: "inGain") }
+            r.forget(); exit(0)
+        }
         if let i = a.firstIndex(of: "--gain-test"), i + 1 < a.count {
             // the auto gain on an input whose name contains the word, its volume put back afterwards: --gain-test BlackHole
             exit(gainTest(a[i + 1]) ? 0 : 1)
@@ -631,7 +657,7 @@ enum Main {
         let end = Date().addingTimeInterval(40)
         while Date() < end {
             RunLoop.main.run(until: Date().addingTimeInterval(0.1))
-            let line = "\(r.gain) \(String(format: "%.3f", r.inVolume)) \(r.inPercent) % \(r.gainNote ?? "")"
+            let line = "\(r.gain) \(String(format: "%.3f", r.inVolume)) \(r.inGainText) \(r.gainNote ?? "")"
             if line != last { print(String(format: "%5.1f dB  ", r.inMeter.holdL) + line); last = line }
             if r.gain == .done || r.gain == .failed { break }
         }

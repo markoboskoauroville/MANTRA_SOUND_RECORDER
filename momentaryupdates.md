@@ -120,3 +120,15 @@
 |---|---|---|
 | 1 | Auto gain may push the gain above 100 % when the device's volume is at its top | done in v10: up to 1000 % (+20 dB boost after the volume); measured on BlackHole -38.8 → -12.0 dB at 251 % |
 | 2 | The name Sound Recorder (Mantra) everywhere | done: the app was renamed in v9; v10 fixes the last place, the window's title (was "Mantra Sound Recorder") |
+
+## 1.11.2026, v11: dB, not percent; +32 dB; the slider is the indicator
+> "You need to understand the peak levels go to -12, and this is how you do this. Please convert percentage, which is a material unit of measurement, to dB"
+> "maximum output level over the scale of 0 dB is 32 dB. Game over, and I can do it also with the slider"
+> "and slider always reflects, of course, the level of dbs. It's an indicator"
+
+| # | Item | Status |
+|---|---|---|
+| 1 | The gain shown in dB, never % (Input and Output; the auto gain's note too) | done in v11 |
+| 2 | Up to +32 dB above 0 dB | done in v11: the boost now reaches +32 dB |
+| 3 | The slider reaches the boost by hand | done in v11: right of the 0 dB mark is the boost, in amber |
+| 4 | The slider is a dB indicator | done in v11: -60 dB … 0 (mark) … +32 dB, linear in dB; measured round trip 0.2/0.5/0.652/0.8/1.0 → -41.6/-14.0/0.0/+13.6/+32.0 dB → the same positions; auto gain on BlackHole -43.8 → -12.0 dB at +13.0 dB, the slider following |
