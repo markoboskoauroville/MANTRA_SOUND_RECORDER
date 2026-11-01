@@ -112,3 +112,11 @@
 > "second point, please look at the screenshot at the top. I have applications which have Mantra at the beginning, right? In the manifest, the Mantra manifest never ever names apps with Mantra at the beginning. Mantra always comes at the end in parentheses, and in the beginning is a normal name of the app without the Mantra prefix Which means you need to go through all my apps, and anything called Mantra at the beginning should be renamed."
 
 **Status:** v9 (1.11.2026): the app is now Sound Recorder (Mantra).app; bundle id kept (Microphone stays allowed); the old copy removed; the star row updated.
+
+## 1.11.2026, v10: gain above 100 % with auto gain
+> "we need to update Mantra Sound Recorder so gain can be above 100% while using the auto gain feature  this app needs to be renamed like my other apps, Sound Recorder, and then in parentheses, Mantra. Sound is the first word"
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Auto gain may push the gain above 100 % when the device's volume is at its top | in progress |
+| 2 | The name Sound Recorder (Mantra) everywhere | in progress |
