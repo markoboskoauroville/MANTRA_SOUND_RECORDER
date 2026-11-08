@@ -2,7 +2,7 @@
 // this one which is running and run the new one ... close it through accessibility"), then the new one is opened.
 // First the window's OFF (AXIdentifier "off"; "quit" in v4–v6, which had a QUIT); a copy without it (v3 and older, or no window open) is
 // quit by its own menu: the app menu's "Quit …" item. Never killed: if it does not go, the script says so and stops.
-// Usage: swift tools/relaunch.swift <bundle id> <app path>
+// Usage: swift tools/relaunch.swift <bundle id> <full app path> [--no-open]
 import AppKit
 import ApplicationServices
 
@@ -62,6 +62,10 @@ if !running.isEmpty {
         print("relaunch: quit pid \(app.processIdentifier) through \(how)")
     }
 }
+// --no-open: only quit the running copy (an install in between, then one `open -g -a <path>`); 9.11.2026: passing a name instead
+// of the path, or opening before the new copy is in place, made macOS show "The file can't be found."
+if args.contains("--no-open") { exit(0) }
+guard FileManager.default.fileExists(atPath: path) else { print("relaunch: no app at \(path) (give the full path)"); exit(1) }
 let cfg = NSWorkspace.OpenConfiguration()
 var newPid: pid_t = 0
 let sem = DispatchSemaphore(value: 0)
