@@ -630,15 +630,15 @@ enum Main {
                 print("== \(parts[0]): opening \(parts[1])")
                 _ = Firefox.run(["-t", "suno", "open", parts[1]], timeout: 60)
                 var s = SunoState(); var n = 0
-                while n < 40 { s = Firefox.probe(); if s.ok { break }; Thread.sleep(forTimeInterval: 0.5); n += 1 }
-                guard s.ok else { print("   no player"); continue }
-                print("   \(s.title), duration \(Clock.mmss(s.d)) (\(s.d) s)")
+                while n < 40 { s = Firefox.probe(); if s.onSong { break }; Thread.sleep(forTimeInterval: 0.5); n += 1 }
+                guard s.onSong else { print("   not a song page"); continue }
+                print("   \(s.title)")
                 guard let t = sess.recordSong(log: { print("   \($0)") }) else { print("   FAILED"); continue }
                 let out = dir.appendingPathComponent(parts[0] + ".wav")
                 do { try Recorder.writeWAV(t, to: out); t.savedTo = out } catch { print("   save failed: \(error)"); continue }
                 var peak: Float = 0
                 for i in stride(from: 0, to: t.frames, by: 1) { peak = max(peak, abs(t.l[i]), abs(t.r[i])) }
-                print(String(format: "   SAVED %@  %.2f s (Suno says %.2f s, off by %.2f)  peak %.1f dBFS", out.path, t.seconds, s.d, t.seconds - s.d, 20 * log10(Double(max(peak, 0.00001)))))
+                print(String(format: "   SAVED %@  %.2f s (Suno says %.2f s, off by %.2f)  peak %.1f dBFS", out.path, t.seconds, sess.lastDuration, t.seconds - sess.lastDuration, 20 * log10(Double(max(peak, 0.00001)))))
             }
             print("ALL DONE"); DispatchQueue.main.async { r.forget(); exit(0) }
         }
@@ -725,14 +725,14 @@ struct SunoPanel: View {
     @State private var note = ""
     var body: some View {
         let s = watch.state
-        Panel(title: "Suno", right: AnyView(Text(s.ok ? s.title : "no song in Firefox").font(.system(size: 11)).foregroundStyle(Ink.dim).lineLimit(1))) {
+        Panel(title: "Suno", right: AnyView(Text(s.onSong ? s.title : "no song in Firefox").font(.system(size: 11)).foregroundStyle(Ink.dim).lineLimit(1))) {
             HStack(spacing: 18) {
                 clock("ELAPSED", s.ok ? Clock.mmss(s.t) : "-:--")
                 clock("LEFT", s.ok ? Clock.mmss(s.remaining) : "-:--")
                 clock("SONG", s.ok ? Clock.mmss(s.d) : "-:--")
                 Spacer()
                 Button(r.recording ? "RECORDING" : "REC SONG") {
-                    guard !r.recording, s.ok else { return }
+                    guard !r.recording, s.onSong else { return }
                     let ss = SunoSession(r); session = ss
                     DispatchQueue.global().async {
                         let t = ss.recordSong(log: { n in DispatchQueue.main.async { note = n } })
@@ -744,7 +744,7 @@ struct SunoPanel: View {
                         }
                     }
                 }
-                .disabled(r.recording || !s.ok).accessibilityIdentifier("sunorec")
+                .disabled(r.recording || !s.onSong).accessibilityIdentifier("sunorec")
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
             Text(note.isEmpty ? "Takes Firefox's own sound (Screen Recording), the system audio is never touched. Stops by itself at the song's end." : note)

@@ -5,7 +5,7 @@ import Foundation
 import AppKit
 
 struct SunoState: Equatable {
-    var ok = false, playing = false, ended = false
+    var ok = false, onSong = false, playing = false, ended = false
     var t = 0.0, d = 0.0
     var title = ""
     var remaining: Double { max(0, d - t) }
@@ -28,15 +28,17 @@ enum Firefox {
 
     static let probeJS = """
     (()=>{const a=[...document.querySelectorAll('audio,video')].filter(x=>x.duration>5).sort((x,y)=>y.duration-x.duration)[0];\
-    return a?JSON.stringify({t:a.currentTime,d:a.duration,p:!a.paused,e:a.ended,title:document.title}):'{}'})()
+    const s=location.pathname.startsWith('/song/');return a?JSON.stringify({t:a.currentTime,d:a.duration,p:!a.paused,e:a.ended,title:document.title,s:s}):JSON.stringify({s:s,title:document.title})})()
     """
     static func probe() -> SunoState {
         guard let data = eval(probeJS).data(using: .utf8),
-              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let d = j["d"] as? Double else { return SunoState() }
-        return SunoState(ok: true, playing: j["p"] as? Bool ?? false, ended: j["e"] as? Bool ?? false,
-                         t: j["t"] as? Double ?? 0, d: d, title: (j["title"] as? String ?? "").replacingOccurrences(of: " | Suno", with: ""))
+              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return SunoState() }
+        let title = (j["title"] as? String ?? "").replacingOccurrences(of: " | Suno", with: "")
+        guard let d = j["d"] as? Double else { return SunoState(ok: false, onSong: j["s"] as? Bool ?? false, title: title) }
+        return SunoState(ok: true, onSong: j["s"] as? Bool ?? false, playing: j["p"] as? Bool ?? false, ended: j["e"] as? Bool ?? false,
+                         t: j["t"] as? Double ?? 0, d: d, title: title)
     }
-    static let restartJS = "(()=>{const a=[...document.querySelectorAll('audio,video')].filter(x=>x.duration>5).sort((x,y)=>y.duration-x.duration)[0];if(!a)return 'none';a.pause();a.currentTime=0;a.play();return 'ok'})()"
+    static let restartJS = "(()=>{const a=[...document.querySelectorAll('audio,video')].filter(x=>x.duration>5).sort((x,y)=>y.duration-x.duration)[0];if(!a){const b=document.querySelector('button[aria-label=\"Playbar: Play button\"]')||document.querySelector('button[aria-label=\"Play\"]');if(b){b.click();return 'clicked'}return 'none'}a.pause();a.currentTime=0;a.play();return 'ok'})()"
     static let pauseJS = "(()=>{document.querySelectorAll('audio,video').forEach(a=>a.pause());return 'ok'})()"
 }
 
@@ -66,17 +68,18 @@ final class SunoSession: ObservableObject {
     @Published var note = ""
     @Published var running = false
     let r: Recorder
+    var lastDuration = 0.0
     init(_ r: Recorder) { self.r = r }
 
     /// runs on a background thread; returns the take (nil on failure)
     func recordSong(startPlayback: Bool = true, log: @escaping (String) -> Void = { _ in }) -> Take? {
         var s = Firefox.probe()
-        guard s.ok else { log("no Suno player in the page"); return nil }
+        guard s.onSong else { log("Firefox is not on a Suno song page"); return nil }
         DispatchQueue.main.sync { r.chooseInput(Recorder.fireUID) }
         var waited = 0.0
         while !(DispatchQueue.main.sync { r.appReady }) && waited < 15 { Thread.sleep(forTimeInterval: 0.2); waited += 0.2 }
         guard DispatchQueue.main.sync(execute: { r.appReady }) else { log("Firefox audio did not start: \(DispatchQueue.main.sync { r.error ?? "?" })"); return nil }
-        _ = Firefox.eval(Firefox.pauseJS); Thread.sleep(forTimeInterval: 0.5)
+        if s.ok { _ = Firefox.eval(Firefox.pauseJS); Thread.sleep(forTimeInterval: 0.5) }
         DispatchQueue.main.sync { r.record() }
         if startPlayback { _ = Firefox.eval(Firefox.restartJS) }
         running = true
@@ -85,6 +88,7 @@ final class SunoSession: ObservableObject {
         while true {
             Thread.sleep(forTimeInterval: 0.5)
             s = Firefox.probe()
+            if s.ok { lastDuration = s.d }
             if s.playing { seenPlaying = true; idle = 0 }
             if Date().timeIntervalSince(lastLog) > 10 { log("\(s.title) \(Clock.mmss(s.t)) / \(Clock.mmss(s.d)), \(Clock.mmss(s.remaining)) left"); lastLog = Date() }
             let atEnd = s.ok && (s.ended || (seenPlaying && !s.playing && s.t >= s.d - 1.0))
