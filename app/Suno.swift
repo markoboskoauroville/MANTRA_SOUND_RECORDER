@@ -46,7 +46,10 @@ enum Firefox {
     const s=location.pathname.startsWith('/song/');return a?JSON.stringify({t:a.currentTime,d:a.duration,p:!a.paused,e:a.ended,title:document.title,s:s}):JSON.stringify({s:s,title:document.title})})()
     """
     static func probe() -> SunoState {
-        guard let data = eval(probeJS).data(using: .utf8),
+        var out = eval(probeJS)
+        var tries = 0
+        while !out.hasPrefix("{") && tries < 4 { Thread.sleep(forTimeInterval: 0.4); out = eval(probeJS); tries += 1 }
+        guard let data = out.data(using: .utf8),
               let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return SunoState() }
         let title = (j["title"] as? String ?? "").replacingOccurrences(of: " | Suno", with: "")
         guard let d = j["d"] as? Double else { return SunoState(ok: false, onSong: j["s"] as? Bool ?? false, title: title) }
@@ -90,14 +93,15 @@ final class SunoSession: ObservableObject {
     /// why the take did not finish (nil: it did); a take that did not reach the song's end is deleted, never kept
     @Published var failure: String?
     private var wdT = -1.0, wdSince = Date(), wdTitle = "", wdPausedSince: Date?
-    private var wdBad = 0
-    func watchdogReset(title: String) { wdBad = 0; wdT = -1; wdSince = Date(); wdTitle = title; wdPausedSince = nil }
+    private var wdBad: Date?
+    func watchdogReset(title: String) { wdBad = nil; wdT = -1; wdSince = Date(); wdTitle = title; wdPausedSince = nil }
     /// looked at on every probe while recording; returns a reason when the take can no longer be whole
     func watchdog(_ s: SunoState) -> String? {
         if !DispatchQueue.main.sync(execute: { r.appReady }) { return "the capture of Firefox ended" }
         // a probe that fails once or twice is firefoxctl being busy; 6 in a row (about 3 s) is a real change
-        if !s.onSong || !s.ok { wdBad += 1; return wdBad >= 6 ? (s.onSong ? "the player disappeared" : "the Suno page left the song") : nil }
-        wdBad = 0
+        // (another session may hold firefoxctl's single BiDi session for a while: up to 25 s of failed probes is tolerated)
+        if !s.onSong || !s.ok { if wdBad == nil { wdBad = Date() }; return Date().timeIntervalSince(wdBad!) > 25 ? (s.onSong ? "the player disappeared" : "the Suno page did not answer for 25 s (left the song, or Firefox control busy)") : nil }
+        wdBad = nil
         if !wdTitle.isEmpty && !s.title.isEmpty && s.title != wdTitle { return "another song was loaded" }
         let nearEnd = s.t >= s.d - 1.0 || s.ended
         if s.playing {
