@@ -128,7 +128,7 @@ final class SunoSession: ObservableObject {
         DispatchQueue.main.sync { r.record() }
         if startPlayback {
             _ = Firefox.eval(Firefox.restartJS)
-            Thread.sleep(forTimeInterval: 1.5)
+            var w = 0; while w < 8 && !Firefox.probe().playing { Thread.sleep(forTimeInterval: 0.5); w += 1 }   // JS may already have started it: a second click would pause
             if !Firefox.probe().playing { log("autoplay refused: real click"); _ = Firefox.run(["-t", "suno", "eval", "1"], timeout: 5); _ = Firefox.runTool("suno_play", ["play"]) }
         }
         running = true; failure = nil
