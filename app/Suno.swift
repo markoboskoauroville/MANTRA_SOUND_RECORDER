@@ -243,4 +243,4 @@ extension SunoSession {
     }
 }
 
-extension Recorder { static let fireUID = "app:org.mozilla.firefox" }
+extension Recorder { static let fireUID = "app:org.mozilla.firefox"; static let chromeUID = "app:com.google.Chrome" }

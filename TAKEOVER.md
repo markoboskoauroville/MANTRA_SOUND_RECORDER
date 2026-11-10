@@ -1,6 +1,6 @@
 # TAKEOVER: Sound Recorder (Mantra)
 
-**Version 12** (10.11.2026, task 89: Firefox app capture, Suno panel) · Version 11 (1.11.2026) · **closed by Marko 1.11.2026** (before: closed at v8, 31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
+**Version 13** (10.11.2026, task 99: Chrome app capture, the Chrome channel) · Version 12 (10.11.2026, task 89: Firefox app capture, Suno panel) · Version 11 (1.11.2026) · **closed by Marko 1.11.2026** (before: closed at v8, 31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
 `/Applications/Sound Recorder (Mantra).app`, bundle id `community.auroville.mantrasoundrecorder`.
 The reasons behind the choices are in [LESSONS.md](LESSONS.md).
 
@@ -139,3 +139,20 @@ voice engine to adam audio out so it doesnt become a part of record".
 - **Permissions (v12):** one amber button per missing permission at the top (Screen Recording, Microphone), checked at every run, opens its pane, gone when granted.
 - Playback: JavaScript play() is refused by Firefox without a gesture, so `tools/suno_play.py` (installed as ~/.local/bin/suno_play) presses Play with a real BiDi pointer click. The take is trimmed at its ends to the song's length (+0.2 s).
 - Immune to phones and the voice: only Firefox's own sound is captured.
+
+
+## v13 (10.11.2026, task 99): Chrome, and the channel to the Chrome extension
+
+Marko moved Suno to Chrome (Cloudflare kept stopping Firefox). The capture is the same as OBS's
+(obs-studio plugins/mac-capture/mac-sck-audio-capture.m: `SCContentFilter initWithDisplay:includingApplications:`,
+`capturesAudio`, `excludesCurrentProcessAudio`, 2 channels); `AppTap` already did exactly that, so Chrome needed no new
+capture code: `record.app {"bundle":"com.google.Chrome"}`. Chrome's audio comes from its helper processes and
+ScreenCaptureKit gives it to the parent app, as it does for OBS.
+
+- Input menu: "Chrome audio (app capture, no BlackHole)" (`Recorder.chromeUID`) beside Firefox.
+- The door reads the body by Content-Length (long lyrics), answers OPTIONS and sends CORS headers.
+- Each `record.*` starts a fresh job (no note or error left from the take before).
+- `record.app` takes `trim: true`: digital silence (below -70 dBFS) cut at both ends, 50 ms kept.
+- **The Chrome channel** (door functions): `chrome.send {cmd,args}` → id, `chrome.result {id}`, `chrome.state`;
+  the extension calls `chrome.poll {state}` once a second and `chrome.reply {id,result}`. The extension is
+  Suno Controller (Mantra), repo CHROME_SUNO_CONTROLLER; the CLI on this side is `sunoctl`.

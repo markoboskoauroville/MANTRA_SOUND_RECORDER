@@ -344,7 +344,8 @@ final class Recorder: ObservableObject {
 
     private func refreshDevices() {
         let all = Devices.all()
-        inputs = all.filter { $0.inputs > 0 } + [Device(id: 0, name: "Firefox audio (app capture, no BlackHole)", uid: Recorder.fireUID, inputs: 2, outputs: 0)]
+        inputs = all.filter { $0.inputs > 0 } + [Device(id: 0, name: "Firefox audio (app capture, no BlackHole)", uid: Recorder.fireUID, inputs: 2, outputs: 0),
+                                                   Device(id: 0, name: "Chrome audio (app capture, no BlackHole)", uid: Recorder.chromeUID, inputs: 2, outputs: 0)]
         outputs = [Device(id: 0, name: "None (no output)", uid: "none", inputs: 0, outputs: 2)] + all.filter { $0.outputs > 0 }
     }
 
@@ -471,7 +472,7 @@ final class Recorder: ObservableObject {
         inRate = 48000
         Task { @MainActor in
             do { try await t.start(bundle: String(self.inUID.dropFirst(4))); self.appError = nil; self.error = nil }
-            catch { self.appError = "Firefox audio would not start: \(error.localizedDescription). Screen Recording must be allowed for this app."
+            catch { self.appError = "\(self.inUID.contains("Chrome") ? "Chrome" : "Firefox") audio would not start: \(error.localizedDescription). Screen Recording must be allowed for this app."
                     self.error = self.appError; self.tap = nil }
         }
     }

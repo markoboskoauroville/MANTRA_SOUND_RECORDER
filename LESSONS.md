@@ -85,3 +85,15 @@ Appended, never rewritten. Newest last.
   tone never woke it. -25 dBFS (arriving -43.8 dB) is the quietest test that still needs the boost (+13 dB).
 - **My slip:** a Python slice ending at the first "    }\n" matched inside a deeper "        }\n" and left a stray brace;
   cut by a marker line, not by an indentation fragment.
+
+
+## 10.11.2026 (v13, task 99)
+
+- OBS's per-app audio on macOS is ScreenCaptureKit with a display filter that includes one application. Our AppTap was
+  already that, so "do it like OBS" meant pointing it at Chrome, not new code. Read the reference before rewriting.
+- The capture is the whole of Chrome: any other Chrome tab that sounds gets into the take. The extension mutes other
+  audible tabs during a take and gives them back after.
+- A job dictionary that is only ever added to keeps old errors: the probe on 10.11.2026 said "done" and "no take" at
+  once. Start every job empty.
+- A relaunch was held back by 3 takes that were all already on disk (door jobs write their WAV): checked the files
+  before using `relaunch.swift --force`.
