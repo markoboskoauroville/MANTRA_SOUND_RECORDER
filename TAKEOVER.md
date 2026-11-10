@@ -1,6 +1,6 @@
 # TAKEOVER: Sound Recorder (Mantra)
 
-**Version 11** (1.11.2026) · **closed by Marko 1.11.2026** (before: closed at v8, 31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
+**Version 12** (10.11.2026, task 89: Firefox app capture, Suno panel) · Version 11 (1.11.2026) · **closed by Marko 1.11.2026** (before: closed at v8, 31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
 `/Applications/Sound Recorder (Mantra).app`, bundle id `community.auroville.mantrasoundrecorder`.
 The reasons behind the choices are in [LESSONS.md](LESSONS.md).
 
@@ -109,3 +109,26 @@ whose name contains the word and never changes the saved choice. Test audio goes
 - v2 volume sliders not yet moved by a hand; the ADAM read back 88 % as SoundSource shows.
 - Not tried: device unplugged during recording or playing, devices with more than two channels, a take of more
   than a few minutes (memory: about 23 MB a minute).
+
+
+## v12 (10.11.2026): recording Suno without touching the system audio
+
+Marko: "record suno without changing anything in my system audio in and out ... no out only in" and "fix audio output of
+voice engine to adam audio out so it doesnt become a part of record".
+
+- **Way chosen: (a) ScreenCaptureKit, per-app capture of Firefox** (`AppTap` in app/Audio.swift). Input menu entry
+  "Firefox audio (app capture, no BlackHole)"; BlackHole is not needed and the Mac's default input/output are never
+  read-modify-written (the app only reads defaults). The voice engine is another process, so it is never in the take.
+  Output menu has "None (no output)". (b) SoundSource routing was not needed. Needs **Screen Recording** for the app
+  (Marko allows it once); capture gain -3 dB (`appGain` 0.708) because the Suno masters peak at 0 dBFS.
+- **Suno panel**: once a second `firefoxctl -t suno eval` reads the page's player (the longest audio element: currentTime,
+  duration): ELAPSED, LEFT, SONG. **REC SONG** (AX button, so `star press "sound recorder" "REC SONG"` through the Star
+  API works) records from 0, starts the page's player (clicks Playbar Play when no audio element yet), stops 0.8 s after
+  the player ends, saves one whole WAV to ~/Music/Suno. No live meter is needed.
+- **CLI** (headless, must be started with `open -n -a` so Screen Recording is the app's):
+  `open -n -a "/Applications/Sound Recorder (Mantra).app" --stdout log --args --suno-record <outdir> earth=<song url> ...`
+- **Voice silent while recording**: the app writes ~/.voice/recording.flag (its pid) while a take is open.
+  MANTRA_VOICE (`pinned.py`: voiced.py MicGuard.hold, clone.py via tools/adamplay.py), `langsay` and `phonesay` stay silent while the flag's pid lives
+  (a stale flag does not hold). The voice engine plays to "ADAM Audio D3V" by name (`pinned.adam_output()`, never BlackHole), whatever the system output is.
+- Files: app/Suno.swift (Firefox probe, SunoWatch, SunoSession), app/Audio.swift (AppTap, RecordingFlag), App.swift (SunoPanel, --suno-record).
+- Not proven yet: the first real take (waiting for the Screen Recording permission).
