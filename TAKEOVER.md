@@ -132,3 +132,10 @@ voice engine to adam audio out so it doesnt become a part of record".
   (a stale flag does not hold). The voice engine plays to "ADAM Audio D3V" by name (`pinned.adam_output()`, never BlackHole), whatever the system output is.
 - Files: app/Suno.swift (Firefox probe, SunoWatch, SunoSession), app/Audio.swift (AppTap, RecordingFlag), App.swift (SunoPanel, --suno-record).
 - Not proven yet: the first real take (waiting for the Screen Recording permission).
+
+- **Star API functions (v12):** door on 127.0.0.1:8869 (app/Door.swift), registered in ~/.config/star-fns/sound-recorder.json, reached by
+  `star fn "sound recorder" <function> '<json>'`: `record.app`, `record.suno`, `record.status`, `record.stop`, `permissions`.
+  `tools/record_suno_list.py` records a list through them and checks every take (duration, peak, Whisper on the first/last 30 s).
+- **Permissions (v12):** one amber button per missing permission at the top (Screen Recording, Microphone), checked at every run, opens its pane, gone when granted.
+- Playback: JavaScript play() is refused by Firefox without a gesture, so `tools/suno_play.py` (installed as ~/.local/bin/suno_play) presses Play with a real BiDi pointer click. The take is trimmed at its ends to the song's length (+0.2 s).
+- Immune to phones and the voice: only Firefox's own sound is captured.

@@ -80,6 +80,7 @@ final class SunoSession: ObservableObject {
     @Published var running = false
     let r: Recorder
     var lastDuration = 0.0
+    var cancel = false
     init(_ r: Recorder) { self.r = r }
 
     /// runs on a background thread; returns the take (nil on failure)
@@ -102,6 +103,7 @@ final class SunoSession: ObservableObject {
         var seenPlaying = false, idle = 0
         while true {
             Thread.sleep(forTimeInterval: 0.5)
+            if cancel { break }
             s = Firefox.probe()
             if s.ok { lastDuration = s.d }
             if s.playing { seenPlaying = true; idle = 0 }
@@ -116,6 +118,38 @@ final class SunoSession: ObservableObject {
         DispatchQueue.main.sync { r.stopRecording(); take = r.takes.last }
         running = false
         _ = Firefox.eval(Firefox.pauseJS)
+        if let t = take, lastDuration > 5 { Self.trim(t, to: lastDuration) }
+        return take
+    }
+
+    /// the page's start-up and the 0.8 s tail are not the song: the take begins 0.05 s before the first sound and is the
+    /// song's length plus 0.2 s (one whole take, only its ends are cut, nothing inside it)
+    static func trim(_ t: Take, to d: Double) {
+        let thr: Float = 0.001                         // -60 dBFS
+        var first = 0
+        while first < t.frames && max(abs(t.l[first]), abs(t.r[first])) < thr { first += 1 }
+        let a = max(0, first - Int(0.05 * t.rate)), b = min(t.frames, a + Int((d + 0.2) * t.rate))
+        t.l = Array(t.l[a..<b]); t.r = Array(t.r[a..<b])
+        t.peaks = stride(from: 0, to: t.frames, by: 256).map { s in
+            var m: Float = 0
+            for i in s..<min(t.frames, s + 256) { m = max(m, abs(t.l[i]), abs(t.r[i])) }
+            return m
+        }
+    }
+}
+
+extension SunoSession {
+    /// one app's sound for `seconds` (nil: until `cancel`), whatever it plays
+    func recordApp(bundle: String, seconds: Double?) -> Take? {
+        DispatchQueue.main.sync { r.chooseInput("app:" + bundle) }
+        var waited = 0.0
+        while !(DispatchQueue.main.sync { r.appReady }) && waited < 15 { Thread.sleep(forTimeInterval: 0.2); waited += 0.2 }
+        guard DispatchQueue.main.sync(execute: { r.appReady }) else { return nil }
+        DispatchQueue.main.sync { r.record() }
+        let start = Date()
+        while !cancel && (seconds == nil || Date().timeIntervalSince(start) < seconds!) { Thread.sleep(forTimeInterval: 0.2) }
+        var take: Take?
+        DispatchQueue.main.sync { r.stopRecording(); take = r.takes.last }
         return take
     }
 }

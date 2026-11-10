@@ -541,6 +541,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
     private var keys: Any?
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
+        Door.shared.start()          // v12: the Star API functions on 127.0.0.1:8869
         // R records, Space plays; with ⌘ the menus keep their keys
         keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
             if !e.modifierFlags.intersection([.command, .control, .option]).isEmpty { return e }

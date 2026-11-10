@@ -338,7 +338,7 @@ final class Recorder: ObservableObject {
     }
 
     private func pick(_ saved: String?, _ list: [Device], _ def: AudioDeviceID) -> String {
-        if let s = saved, list.contains(where: { $0.uid == s }) { return s }
+        if let s = saved, list.contains(where: { $0.uid == s }) || (s.hasPrefix("app:") && !s.isEmpty && saved != nil) { return saved! }
         return list.first(where: { $0.id == def })?.uid ?? list.first?.uid ?? ""
     }
 
@@ -470,17 +470,19 @@ final class Recorder: ObservableObject {
         tap = t
         inRate = 48000
         Task { @MainActor in
-            do { try await t.start(bundle: "org.mozilla.firefox"); self.appError = nil; self.error = nil }
+            do { try await t.start(bundle: String(self.inUID.dropFirst(4))); self.appError = nil; self.error = nil }
             catch { self.appError = "Firefox audio would not start: \(error.localizedDescription). Screen Recording must be allowed for this app."
                     self.error = self.appError; self.tap = nil }
         }
     }
+    var elapsedNow: Double { current?.seconds ?? 0 }
+    var inLevelDB: Float { inMeter.holdL }
     var appReady: Bool { tap?.running == true }
 
     private func startInput() {
         stopInput()
-        if inUID == Recorder.fireUID { guard live else { return }; startApp(); return }
-        guard live, inUID != Recorder.fireUID, Permissions.allowed("Microphone"),
+        if inUID.hasPrefix("app:") { guard live else { return }; startApp(); return }
+        guard live, !inUID.hasPrefix("app:"), Permissions.allowed("Microphone"),
               let dev = inputs.first(where: { $0.uid == inUID }) else { return }
         inDev = dev.id
         inRate = Devices.rate(dev.id)
@@ -531,7 +533,7 @@ final class Recorder: ObservableObject {
 
     func record() {
         guard !recording else { return }
-        guard inProc != nil || appReady else { if inUID != Recorder.fireUID { Permissions.openMissing() }; return }
+        guard inProc != nil || appReady else { if !inUID.hasPrefix("app:") { Permissions.openMissing() }; return }
         pause()
         stopAutoGain()
         let t = Take(id: nextID, rate: inRate)
@@ -707,7 +709,7 @@ final class Recorder: ObservableObject {
     func toggleAutoGain() {
         if gain == .listening || gain == .adjusting { stopAutoGain(); return }
         guard !recording else { return }
-        guard inProc != nil || appReady else { if inUID != Recorder.fireUID { Permissions.openMissing() }; return }
+        guard inProc != nil || appReady else { if !inUID.hasPrefix("app:") { Permissions.openMissing() }; return }
         gain = .listening; gListenStart = Date(); gRound = 0
         gainNote = "AUTO GAIN: sing or play as loud as you will record"
     }
@@ -843,7 +845,7 @@ final class Recorder: ObservableObject {
 enum Permissions {
     /// what this run needs: Screen Recording for the Firefox capture, the Microphone for a real input device
     static var needed: [String] {
-        UserDefaults.standard.string(forKey: "input") == Recorder.fireUID ? ["Screen Recording"] : ["Microphone"]
+        (UserDefaults.standard.string(forKey: "input") ?? "").hasPrefix("app:") ? ["Screen Recording"] : ["Microphone"]
     }
     static func allowed(_ p: String) -> Bool {
         switch p {
