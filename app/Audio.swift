@@ -545,7 +545,7 @@ final class Recorder: ObservableObject {
         blockMax = 0; blockN = 0
         readPos = max(0, ring.fill() - Int64(preroll * inRate))
         recording = true
-        RecordingFlag.set(true)
+        if !inUID.hasPrefix("app:") { RecordingFlag.set(true) }     // only a system-wide input holds the voice; the per-app Firefox capture never hears it
     }
 
     /// the take joins the list, and the empty row below it waits for the next one

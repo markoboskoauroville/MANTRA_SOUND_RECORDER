@@ -153,3 +153,5 @@
 > (10.11.2026, Marko) "please inside the app sound recorder add action button record Suno song and then it will look at the browser of Firefox it will switch it to remote control mode and whatever song is loaded in that window is going to recognize it and when I press play in the Suno inside If you open the Firefox browser, it will start recording automatically and it will stop the song when it comes to the end so it doesn't go to the next song and it will close the file. So everything happening automatically, programmatically. So there is no need for AI anymore. Everything is encoded in the application."
 
 > (10.11.2026, Marko) "So I just logged in into the Groq and now suddenly the recording of mantra stopped from the Suno. So the app should also detect if something is wrong and then delete the old take and ask to record again because it didn't finish."
+
+> (10.11.2026, Marko) "You are not updated man. Sound recorder is developed so it can record audio directly from the tab inside Firefox. The connection is direct and there is no issues. You can talk."

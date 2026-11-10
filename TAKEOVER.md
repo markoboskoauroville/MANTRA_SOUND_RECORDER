@@ -127,7 +127,7 @@ voice engine to adam audio out so it doesnt become a part of record".
   the player ends, saves one whole WAV to ~/Music/Suno. No live meter is needed.
 - **CLI** (headless, must be started with `open -n -a` so Screen Recording is the app's):
   `open -n -a "/Applications/Sound Recorder (Mantra).app" --stdout log --args --suno-record <outdir> earth=<song url> ...`
-- **Voice silent while recording**: the app writes ~/.voice/recording.flag (its pid) while a take is open.
+- **Voice and the flag (corrected 10.11.2026, Marko: "it can record audio directly from the tab inside Firefox ... You can talk")**: the app writes ~/.voice/recording.flag (its pid) only while it records a system-wide input (BlackHole, a microphone); the per-app Firefox capture never writes it, so the voice may speak during a Suno take. The voice stays pinned to the ADAM.
   MANTRA_VOICE (`pinned.py`: voiced.py MicGuard.hold, clone.py via tools/adamplay.py), `langsay` and `phonesay` stay silent while the flag's pid lives
   (a stale flag does not hold). The voice engine plays to "ADAM Audio D3V" by name (`pinned.adam_output()`, never BlackHole), whatever the system output is.
 - Files: app/Suno.swift (Firefox probe, SunoWatch, SunoSession), app/Audio.swift (AppTap, RecordingFlag), App.swift (SunoPanel, --suno-record).
