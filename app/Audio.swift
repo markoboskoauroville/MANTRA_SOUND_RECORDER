@@ -12,6 +12,8 @@ import CoreAudio
 import AudioToolbox
 import AVFoundation
 import AppKit
+import ScreenCaptureKit
+import CoreMedia
 
 struct Device: Identifiable, Hashable {
     let id: AudioDeviceID
@@ -342,8 +344,8 @@ final class Recorder: ObservableObject {
 
     private func refreshDevices() {
         let all = Devices.all()
-        inputs = all.filter { $0.inputs > 0 }
-        outputs = all.filter { $0.outputs > 0 }
+        inputs = all.filter { $0.inputs > 0 } + [Device(id: 0, name: "Firefox audio (app capture, no BlackHole)", uid: Recorder.fireUID, inputs: 2, outputs: 0)]
+        outputs = [Device(id: 0, name: "None (no output)", uid: "none", inputs: 0, outputs: 2)] + all.filter { $0.outputs > 0 }
     }
 
     private func devicesChanged() {
@@ -357,7 +359,7 @@ final class Recorder: ObservableObject {
 
     // ---------------------------------------------------------------- the volumes
     private func watchVolumes() {
-        let i = inputs.first { $0.uid == inUID }, o = outputs.first { $0.uid == outUID }
+        let i = inputs.first { $0.uid == inUID && $0.id != 0 }, o = outputs.first { $0.uid == outUID && $0.id != 0 }
         if inWatch?.dev != i?.id || (inWatch == nil && i != nil) {
             inWatch = i.flatMap { VolumeWatch(dev: $0.id, input: true) { [weak self] v in self?.inVolume = v } }
         }
@@ -449,9 +451,36 @@ final class Recorder: ObservableObject {
     func permissionsChanged() { if live && inProc == nil { startInput() } }
 
     // ---------------------------------------------------------------- the input
+    private var tap: AppTap?
+    /// 10.11.2026 (task 89): Firefox's own sound through ScreenCaptureKit, in place of a device. The system's output and
+    /// input are never touched, so the voice engine (its own process) can never get into the take.
+    var appGain: Float = 0.708                         // -3 dB headroom: the Suno masters peak at 0 dBFS
+    @Published private(set) var appError: String?
+
+    private func startApp() {
+        let t = AppTap { [weak self] l, r, n in
+            guard let self = self else { return }
+            let g = self.appGain
+            var pl: Float = 0, pr: Float = 0
+            let ml = UnsafeMutablePointer<Float>.allocate(capacity: n), mr = UnsafeMutablePointer<Float>.allocate(capacity: n)
+            for i in 0..<n { ml[i] = l[i] * g; mr[i] = r[i] * g; pl = max(pl, abs(ml[i])); pr = max(pr, abs(mr[i])) }
+            self.ring.write(ml, mr, n); ml.deallocate(); mr.deallocate()
+            self.rawInL = max(self.rawInL, pl); self.rawInR = max(self.rawInR, pr)
+        }
+        tap = t
+        inRate = 48000
+        Task { @MainActor in
+            do { try await t.start(bundle: "org.mozilla.firefox"); self.appError = nil; self.error = nil }
+            catch { self.appError = "Firefox audio would not start: \(error.localizedDescription). Screen Recording must be allowed for this app."
+                    self.error = self.appError; self.tap = nil }
+        }
+    }
+    var appReady: Bool { tap?.running == true }
+
     private func startInput() {
         stopInput()
-        guard live, Permissions.allowed("Microphone"),
+        if inUID == Recorder.fireUID { guard live else { return }; startApp(); return }
+        guard live, inUID != Recorder.fireUID, Permissions.allowed("Microphone"),
               let dev = inputs.first(where: { $0.uid == inUID }) else { return }
         inDev = dev.id
         inRate = Devices.rate(dev.id)
@@ -491,17 +520,18 @@ final class Recorder: ObservableObject {
     private func stopInput() {
         if let p = inProc { AudioDeviceStop(inDev, p); AudioDeviceDestroyIOProcID(inDev, p) }
         inProc = nil
+        tap?.stop(); tap = nil
         rawInL = 0; rawInR = 0
     }
 
-    var canRecord: Bool { inProc != nil }
+    var canRecord: Bool { inProc != nil || appReady }
 
     // ---------------------------------------------------------------- recording
     func toggleRecord() { recording ? stopRecording() : record() }
 
     func record() {
         guard !recording else { return }
-        guard inProc != nil else { Permissions.openMissing(); return }
+        guard inProc != nil || appReady else { if inUID != Recorder.fireUID { Permissions.openMissing() }; return }
         pause()
         stopAutoGain()
         let t = Take(id: nextID, rate: inRate)
@@ -510,6 +540,7 @@ final class Recorder: ObservableObject {
         blockMax = 0; blockN = 0
         readPos = ring.fill()
         recording = true
+        RecordingFlag.set(true)
     }
 
     /// the take joins the list, and the empty row below it waits for the next one
@@ -518,6 +549,7 @@ final class Recorder: ObservableObject {
         drain()
         if blockN > 0 { t.peaks.append(blockMax); blockMax = 0; blockN = 0 }
         recording = false
+        RecordingFlag.set(false)
         current = nil
         if t.frames > 1 { takes.append(t); lastID = t.id; nextID += 1 }
     }
@@ -557,7 +589,7 @@ final class Recorder: ObservableObject {
     }
 
     func play(_ t: Take) {
-        guard !recording, t.frames > 1, let dev = outputs.first(where: { $0.uid == outUID }) else { return }
+        guard !recording, t.frames > 1, let dev = outputs.first(where: { $0.uid == outUID }), dev.id != 0 else { return }
         pause()
         if t.cursor >= Double(t.frames - 2) { t.cursor = 0 }
         let n = t.frames
@@ -675,7 +707,7 @@ final class Recorder: ObservableObject {
     func toggleAutoGain() {
         if gain == .listening || gain == .adjusting { stopAutoGain(); return }
         guard !recording else { return }
-        guard inProc != nil else { Permissions.openMissing(); return }
+        guard inProc != nil || appReady else { if inUID != Recorder.fireUID { Permissions.openMissing() }; return }
         gain = .listening; gListenStart = Date(); gRound = 0
         gainNote = "AUTO GAIN: sing or play as loud as you will record"
     }
@@ -826,5 +858,71 @@ enum Permissions {
             }
         }
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_" + p)!)
+    }
+}
+
+/// The voice engine and langsay stay silent while this file exists and its pid lives (task 89, 10.11.2026).
+enum RecordingFlag {
+    static let url = URL(fileURLWithPath: NSHomeDirectory() + "/.voice/recording.flag")
+    static func set(_ on: Bool) {
+        if on {
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? "\(ProcessInfo.processInfo.processIdentifier)".write(to: url, atomically: true, encoding: .utf8)
+        } else { try? FileManager.default.removeItem(at: url) }
+    }
+}
+
+/// One app's sound through ScreenCaptureKit (macOS 13+): planar or interleaved float frames to the ring.
+final class AppTap: NSObject, SCStreamOutput, SCStreamDelegate {
+    private var stream: SCStream?
+    private let sink: (UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void
+    private(set) var running = false
+    private let q = DispatchQueue(label: "apptap")
+    init(sink: @escaping (UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void) { self.sink = sink }
+
+    func start(bundle: String) async throws {
+        let c = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        guard let app = c.applications.first(where: { $0.bundleIdentifier == bundle }) else {
+            throw NSError(domain: "AppTap", code: 1, userInfo: [NSLocalizedDescriptionKey: "\(bundle) is not running"]) }
+        guard let disp = c.displays.first else { throw NSError(domain: "AppTap", code: 2, userInfo: [NSLocalizedDescriptionKey: "no display"]) }
+        let f = SCContentFilter(display: disp, including: [app], exceptingWindows: [])
+        let cfg = SCStreamConfiguration()
+        cfg.capturesAudio = true; cfg.sampleRate = 48000; cfg.channelCount = 2; cfg.excludesCurrentProcessAudio = true
+        cfg.width = 2; cfg.height = 2; cfg.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        let s = SCStream(filter: f, configuration: cfg, delegate: self)
+        try s.addStreamOutput(self, type: .audio, sampleHandlerQueue: q)
+        try s.addStreamOutput(self, type: .screen, sampleHandlerQueue: q)
+        try await s.startCapture()
+        stream = s; running = true
+    }
+    func stop() { running = false; let s = stream; stream = nil; Task { try? await s?.stopCapture() } }
+    func stream(_ stream: SCStream, didStopWithError error: Error) { running = false }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sb: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .audio, sb.isValid, let fd = CMSampleBufferGetFormatDescription(sb),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fd)?.pointee else { return }
+        var abl = AudioBufferList(); var bb: CMBlockBuffer?
+        var size = 0
+        CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(sb, bufferListSizeNeededOut: &size, bufferListOut: nil, bufferListSize: 0,
+                                                                blockBufferAllocator: nil, blockBufferMemoryAllocator: nil, flags: 0, blockBufferOut: nil)
+        let raw = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: 16); defer { raw.deallocate() }
+        let list = raw.assumingMemoryBound(to: AudioBufferList.self)
+        guard CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(sb, bufferListSizeNeededOut: nil, bufferListOut: list, bufferListSize: size,
+              blockBufferAllocator: nil, blockBufferMemoryAllocator: nil, flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment, blockBufferOut: &bb) == noErr else { return }
+        _ = abl
+        let bufs = UnsafeMutableAudioBufferListPointer(list)
+        let n = CMSampleBufferGetNumSamples(sb)
+        guard n > 0, let d0 = bufs[0].mData?.assumingMemoryBound(to: Float.self) else { return }
+        let planar = asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
+        let l = UnsafeMutablePointer<Float>.allocate(capacity: n), r = UnsafeMutablePointer<Float>.allocate(capacity: n)
+        defer { l.deallocate(); r.deallocate() }
+        if planar {
+            let d1 = bufs.count > 1 ? (bufs[1].mData?.assumingMemoryBound(to: Float.self) ?? d0) : d0
+            for i in 0..<n { l[i] = d0[i]; r[i] = d1[i] }
+        } else {
+            let ch = max(1, Int(asbd.mChannelsPerFrame))
+            for i in 0..<n { l[i] = d0[i * ch]; r[i] = d0[i * ch + (ch > 1 ? 1 : 0)] }
+        }
+        sink(l, r, n)
     }
 }

@@ -143,3 +143,5 @@
 
 > "or even better fix audio output of voice engine to adam audio out so it doesnt become a part of record"
 > "basically upgrade skills for our black hole recorder make also swift app or better use existing app we did sound recorder to record suno without changing anything in my system audio in and out in app you choose in and out in this case no out only in to black hole and while recording meaning update recording app show automatic times you are monitoring from suno to see how much is left to record a song now stop recording and redo all with our swift app"
+
+> (10.11.2026, Marko) "What is going on with our Chakra recording of the song from Suno? Are you building an app, updating it to be able to use it as your worker? Basically, this app is your worker. We have an API already developed for My Star Apps, so you always need to use My Star Apps for everything you do on this computer. Star Apps are your tools, and if some features are missing, just upgrade them, like we are doing for this recorder, which can now go without changing any system settings in audio."

@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 11
+let VERSION = 12
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -49,6 +49,7 @@ struct Root: View {
                 VStack(alignment: .leading, spacing: 12) {
                     TopRow(missing: missing)
                     DevicesPanel(r: r)
+                    SunoPanel(r: r)
                     TakesPanel(r: r)
                     Footer()
                 }
@@ -577,6 +578,11 @@ enum Main {
             let w = i + 2 < a.count ? Double(a[i + 2]) ?? 720 : 720, h = i + 3 < a.count ? Double(a[i + 3]) ?? 540 : 540
             exit(shot(a[i + 1], w, h) ? 0 : 1)
         }
+        if let i = a.firstIndex(of: "--suno-record"), i + 2 < a.count {
+            // --suno-record <outdir> <name>=<song url> ...  one whole WAV per song, stops by itself at the song's end.
+            // Start it with `open -n -a "Sound Recorder (Mantra)" --stdout log --args ...` (Screen Recording belongs to the app).
+            sunoCLI(Array(a[(i + 1)...])); return
+        }
         if let i = a.firstIndex(of: "--play-test"), i + 1 < a.count {
             // the test take played to an output whose name contains the word: --play-test BlackHole
             exit(playTest(a[i + 1]) ? 0 : 1)
@@ -607,6 +613,36 @@ enum Main {
             exit(gainTest(a[i + 1]) ? 0 : 1)
         }
         RecorderApp.main()
+    }
+
+    static func sunoCLI(_ args: [String]) {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
+        setvbuf(stdout, nil, _IOLBF, 0)
+        let dir = URL(fileURLWithPath: (args[0] as NSString).expandingTildeInPath)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let r = Recorder(live: true)
+        let sess = SunoSession(r)
+        DispatchQueue.global().async {
+            for item in args.dropFirst() {
+                let parts = item.split(separator: "=", maxSplits: 1).map(String.init)
+                guard parts.count == 2 else { continue }
+                print("== \(parts[0]): opening \(parts[1])")
+                _ = Firefox.run(["-t", "suno", "open", parts[1]], timeout: 60)
+                var s = SunoState(); var n = 0
+                while n < 40 { s = Firefox.probe(); if s.ok { break }; Thread.sleep(forTimeInterval: 0.5); n += 1 }
+                guard s.ok else { print("   no player"); continue }
+                print("   \(s.title), duration \(Clock.mmss(s.d)) (\(s.d) s)")
+                guard let t = sess.recordSong(log: { print("   \($0)") }) else { print("   FAILED"); continue }
+                let out = dir.appendingPathComponent(parts[0] + ".wav")
+                do { try Recorder.writeWAV(t, to: out); t.savedTo = out } catch { print("   save failed: \(error)"); continue }
+                var peak: Float = 0
+                for i in stride(from: 0, to: t.frames, by: 1) { peak = max(peak, abs(t.l[i]), abs(t.r[i])) }
+                print(String(format: "   SAVED %@  %.2f s (Suno says %.2f s, off by %.2f)  peak %.1f dBFS", out.path, t.seconds, s.d, t.seconds - s.d, 20 * log10(Double(max(peak, 0.00001)))))
+            }
+            print("ALL DONE"); DispatchQueue.main.async { r.forget(); exit(0) }
+        }
+        NSApp.run()
     }
 
     static func shot(_ path: String, _ w: Double, _ h: Double) -> Bool {
@@ -678,5 +714,48 @@ enum Main {
         }
         print(String(format: "played %.1f s of the test take to %@, the output meter's loudest %.1f dBFS", t.seconds, r.outputName, loudest))
         return !r.playing && loudest > -20
+    }
+}
+
+// ---------------------------------------------------------------- SUNO (v12)
+struct SunoPanel: View {
+    @ObservedObject var r: Recorder
+    @StateObject private var watch = SunoWatch()
+    @State private var session: SunoSession?
+    @State private var note = ""
+    var body: some View {
+        let s = watch.state
+        Panel(title: "Suno", right: AnyView(Text(s.ok ? s.title : "no song in Firefox").font(.system(size: 11)).foregroundStyle(Ink.dim).lineLimit(1))) {
+            HStack(spacing: 18) {
+                clock("ELAPSED", s.ok ? Clock.mmss(s.t) : "-:--")
+                clock("LEFT", s.ok ? Clock.mmss(s.remaining) : "-:--")
+                clock("SONG", s.ok ? Clock.mmss(s.d) : "-:--")
+                Spacer()
+                Button(r.recording ? "RECORDING" : "REC SONG") {
+                    guard !r.recording, s.ok else { return }
+                    let ss = SunoSession(r); session = ss
+                    DispatchQueue.global().async {
+                        let t = ss.recordSong(log: { n in DispatchQueue.main.async { note = n } })
+                        DispatchQueue.main.async {
+                            guard let t = t else { return }
+                            let dir = URL(fileURLWithPath: NSHomeDirectory() + "/Music/Suno"); try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                            let name = s.title.replacingOccurrences(of: "/", with: "-") + ".wav"
+                            do { try Recorder.writeWAV(t, to: dir.appendingPathComponent(name)); note = "saved ~/Music/Suno/\(name)" } catch { note = "save failed" }
+                        }
+                    }
+                }
+                .disabled(r.recording || !s.ok).accessibilityIdentifier("sunorec")
+            }
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            Text(note.isEmpty ? "Takes Firefox's own sound (Screen Recording), the system audio is never touched. Stops by itself at the song's end." : note)
+                .font(.system(size: 11)).foregroundStyle(Ink.dim).fixedSize(horizontal: false, vertical: true).padding(.horizontal, 14).padding(.bottom, 8)
+        }
+        .onAppear { watch.start() }
+    }
+    func clock(_ label: String, _ v: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.system(size: 10)).foregroundStyle(Ink.dim)
+            Text(v).font(.system(size: 22, weight: .semibold, design: .monospaced)).foregroundStyle(Ink.text)
+        }
     }
 }
