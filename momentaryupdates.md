@@ -138,3 +138,8 @@
 > close project
 
 **Status:** closed at v11, 1.11.2026. Everything pushed; the lessons are in LESSONS.md and MANTRA_MANIFEST lessons-learned.md. Not yet tried: the auto gain on Marko's voice.
+
+## 10.11.2026, task 89 (master MAC_SES9_08-NOV), v12
+
+> "or even better fix audio output of voice engine to adam audio out so it doesnt become a part of record"
+> "basically upgrade skills for our black hole recorder make also swift app or better use existing app we did sound recorder to record suno without changing anything in my system audio in and out in app you choose in and out in this case no out only in to black hole and while recording meaning update recording app show automatic times you are monitoring from suno to see how much is left to record a song now stop recording and redo all with our swift app"
