@@ -1,6 +1,6 @@
 # TAKEOVER: Sound Recorder (Mantra)
 
-**Version 14** (10.11.2026, task 99: Chrome through a CoreAudio process tap) · Version 13 (10.11.2026: the Chrome channel) · Version 12 (10.11.2026, task 89: Firefox app capture, Suno panel) · Version 11 (1.11.2026) · **closed by Marko 1.11.2026** (before: closed at v8, 31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
+**Version 15** (10.11.2026: "App audio (<app>)" inputs, BlackHole not offered) · Version 14 (10.11.2026, task 99: Chrome through a CoreAudio process tap) · Version 13 (10.11.2026: the Chrome channel) · Version 12 (10.11.2026, task 89: Firefox app capture, Suno panel) · Version 11 (1.11.2026) · **closed by Marko 1.11.2026** (before: closed at v8, 31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
 `/Applications/Sound Recorder (Mantra).app`, bundle id `community.auroville.mantrasoundrecorder`.
 The reasons behind the choices are in [LESSONS.md](LESSONS.md).
 
@@ -172,3 +172,11 @@ Firefox (and other single-process apps) keep ScreenCaptureKit (`AppSource` proto
   Record Your System Audio"; Marko pressed Allow on 10.11.2026. While that prompt waits, `AudioDeviceCreateIOProcIDWithBlock`
   blocks on the main thread and the door stops answering (seen); the take then fails after 15 s.
 - Measured 10.11.2026: 5.1 s of a playing Suno song, peak -6.3 dBFS. The whole-song proof is in CHROME_SUNO_CONTROLLER.
+
+
+## v15 (10.11.2026): "App audio (<app>)"
+
+Marko: "please, in the recorder, don't mention black hole. Just write in the inputs: "App audio" in the parentheses. Which
+app is that". The Input menu: the real input devices, then **App audio (Google Chrome)** and **App audio (Firefox)**;
+the BlackHole device is not offered as an input (the tests `--gain-test` still find it by name). The Suno panel's line
+says "the app's own sound (App audio)". `--inputs` prints the menu's entries (checked 10.11.2026: no BlackHole).

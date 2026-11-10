@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 14
+let VERSION = 15
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -585,6 +585,12 @@ enum Main {
             // Start it with `open -n -a "Sound Recorder (Mantra)" --stdout log --args ...` (Screen Recording belongs to the app).
             sunoCLI(Array(a[(i + 1)...])); return
         }
+        if a.contains("--inputs") {
+            // v15: the Input menu's entries, one per line, as the window lists them
+            let r = Recorder(live: false)
+            for d in r.inputs { print(d.name) }
+            exit(0)
+        }
         if let i = a.firstIndex(of: "--play-test"), i + 1 < a.count {
             // the test take played to an output whose name contains the word: --play-test BlackHole
             exit(playTest(a[i + 1]) ? 0 : 1)
@@ -753,7 +759,7 @@ struct SunoPanel: View {
                 .disabled(r.recording || armed || !s.onSong).accessibilityIdentifier("sunorec")
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
-            Text(note.isEmpty ? "Takes Firefox's own sound (Screen Recording), the system audio is never touched. Press the button, then press play in Suno: it records by itself and stops at the song's end, so the next song never starts." : note)
+            Text(note.isEmpty ? "Takes the app's own sound (App audio), the system audio is never touched. Press the button, then press play in Suno: it records by itself and stops at the song's end, so the next song never starts." : note)
                 .font(.system(size: 11)).foregroundStyle(Ink.dim).fixedSize(horizontal: false, vertical: true).padding(.horizontal, 14).padding(.bottom, 8)
         }
         .onAppear { watch.start() }

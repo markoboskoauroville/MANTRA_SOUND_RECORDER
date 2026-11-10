@@ -159,3 +159,7 @@
 ## 10.11.2026, Marko (task 99, Chrome Suno Controller)
 
 "You need to take direct audio from the application, same as Firefox. You need to develop a workflow for Google Chrome ... go to the repository of OBS and take the code for how to record sound from any application directly, bypassing the operating system ... You just need to detect the program and record its sound the same way OBS is doing it ... make those local extensions for communication between the Chrome browser and the Sound Recorder app possible and flawless." (full words: CHROME_SUNO_CONTROLLER/momentaryupdates.md)
+
+## 10.11.2026, Marko (inputs list)
+
+"please, in the recorder, don't mention black hole. Just write in the inputs: "App audio" in the parentheses. Which app is that"

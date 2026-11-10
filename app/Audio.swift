@@ -344,8 +344,11 @@ final class Recorder: ObservableObject {
 
     private func refreshDevices() {
         let all = Devices.all()
-        inputs = all.filter { $0.inputs > 0 } + [Device(id: 0, name: "Firefox audio (app capture, no BlackHole)", uid: Recorder.fireUID, inputs: 2, outputs: 0),
-                                                   Device(id: 0, name: "Chrome audio (app capture, no BlackHole)", uid: Recorder.chromeUID, inputs: 2, outputs: 0)]
+        // v15 (Marko, 10.11.2026: "don't mention black hole. Just write in the inputs: "App audio" in the parentheses. Which
+        // app is that"): the app sources read "App audio (<app>)", and the BlackHole device is not offered as an input
+        inputs = all.filter { $0.inputs > 0 && !$0.name.localizedCaseInsensitiveContains("blackhole") }
+            + [Device(id: 0, name: "App audio (Google Chrome)", uid: Recorder.chromeUID, inputs: 2, outputs: 0),
+               Device(id: 0, name: "App audio (Firefox)", uid: Recorder.fireUID, inputs: 2, outputs: 0)]
         outputs = [Device(id: 0, name: "None (no output)", uid: "none", inputs: 0, outputs: 2)] + all.filter { $0.outputs > 0 }
     }
 
@@ -431,7 +434,8 @@ final class Recorder: ObservableObject {
     }
 
     func chooseInput(named part: String) -> Bool {
-        guard let d = inputs.first(where: { $0.name.localizedCaseInsensitiveContains(part) }) else { return false }
+        // the tests (--gain-test BlackHole) may name a device the menu hides: look in every device
+        guard let d = (inputs + Devices.all().filter { $0.inputs > 0 }).first(where: { $0.name.localizedCaseInsensitiveContains(part) }) else { return false }
         chooseInput(d.uid)
         return true
     }
