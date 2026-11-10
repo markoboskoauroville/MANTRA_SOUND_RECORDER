@@ -12,8 +12,11 @@ struct SunoState: Equatable {
 }
 
 enum Firefox {
+    /// firefoxctl allows ONE BiDi session at a time: every call of the app goes through this lock (parallel calls made probes fail)
+    static let gate = NSLock()
     static let ctl = NSHomeDirectory() + "/.local/bin/firefoxctl"
     static func run(_ args: [String], timeout: Double = 20) -> String {
+        gate.lock(); defer { gate.unlock() }
         let p = Process(); p.executableURL = URL(fileURLWithPath: ctl); p.arguments = args
         var env = ProcessInfo.processInfo.environment; env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (env["PATH"] ?? "")
         p.environment = env
@@ -25,6 +28,7 @@ enum Firefox {
         return String(data: o.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
     static func runTool(_ name: String, _ args: [String]) -> String {
+        gate.lock(); defer { gate.unlock() }
         let p = Process(); p.executableURL = URL(fileURLWithPath: NSHomeDirectory() + "/.local/bin/" + name); p.arguments = args
         var env = ProcessInfo.processInfo.environment; env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (env["PATH"] ?? "")
         p.environment = env
@@ -86,13 +90,15 @@ final class SunoSession: ObservableObject {
     /// why the take did not finish (nil: it did); a take that did not reach the song's end is deleted, never kept
     @Published var failure: String?
     private var wdT = -1.0, wdSince = Date(), wdTitle = "", wdPausedSince: Date?
-    func watchdogReset(title: String) { wdT = -1; wdSince = Date(); wdTitle = title; wdPausedSince = nil }
+    private var wdBad = 0
+    func watchdogReset(title: String) { wdBad = 0; wdT = -1; wdSince = Date(); wdTitle = title; wdPausedSince = nil }
     /// looked at on every probe while recording; returns a reason when the take can no longer be whole
     func watchdog(_ s: SunoState) -> String? {
         if !DispatchQueue.main.sync(execute: { r.appReady }) { return "the capture of Firefox ended" }
-        if !s.onSong { return "the Suno page left the song" }
+        // a probe that fails once or twice is firefoxctl being busy; 6 in a row (about 3 s) is a real change
+        if !s.onSong || !s.ok { wdBad += 1; return wdBad >= 6 ? (s.onSong ? "the player disappeared" : "the Suno page left the song") : nil }
+        wdBad = 0
         if !wdTitle.isEmpty && !s.title.isEmpty && s.title != wdTitle { return "another song was loaded" }
-        guard s.ok else { return "the player disappeared" }
         let nearEnd = s.t >= s.d - 1.0 || s.ended
         if s.playing {
             wdPausedSince = nil

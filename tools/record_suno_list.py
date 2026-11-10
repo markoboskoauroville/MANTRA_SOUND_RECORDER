@@ -31,6 +31,7 @@ for name, url, secs in items:
         if not r.get('ok'): sys.exit(1)
         time.sleep(3); s = wait()
     j = s['job']; print(name, json.dumps(j), flush=True)
+    if j.get('state') != 'done': print('  FAILED:', j.get('error'), '(the app deleted the partial take)', flush=True); continue
     ok = j.get('state') == 'done' and abs(j['seconds'] - float(secs)) <= 1.0
     total = j.get('seconds', 0)
     first = hear(wav, 0, 30); last = hear(wav, max(0, int(total) - 30), 30)
