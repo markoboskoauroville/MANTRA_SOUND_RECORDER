@@ -86,12 +86,16 @@ final class Door {
                 var take: Take?
                 if fn == "record.suno" {
                     if let u = song { _ = Firefox.run(["-t", "suno", "open", u], timeout: 60); Thread.sleep(forTimeInterval: 2) }
-                    take = sess.recordSong(log: { [weak self] m in self?.setJob("note", m) })
+                    take = (a["wait_for_play"] as? Bool == true ? sess.recordWhenPressed : { sess.recordSong(log: $0) })({ [weak self] m in self?.setJob("note", m) })
+                    _ = 0 // { [weak self] m in self?.setJob("note", m) })
                     self.setJob("title", Firefox.probe().title)
                 } else {
                     take = sess.recordApp(bundle: bundle, seconds: secs)
                 }
-                guard let t = take else { self.setJob("state", "failed"); self.setJob("error", self.main { REC.error ?? "no take" }); return }
+                guard let t = take else {
+                    self.setJob("state", "failed"); self.setJob("error", sess.failure ?? self.main { REC.error ?? "no take" })
+                    self.setJob("action", "record again: the partial take was deleted")
+                    try? FileManager.default.removeItem(at: url); return }
                 do {
                     try Recorder.writeWAV(t, to: url)
                     var peak: Float = 0

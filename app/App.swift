@@ -725,6 +725,8 @@ struct SunoPanel: View {
     @StateObject private var watch = SunoWatch()
     @State private var session: SunoSession?
     @State private var note = ""
+    @State private var armed = false
+    @State private var failed = false
     var body: some View {
         let s = watch.state
         Panel(title: "Suno", right: AnyView(Text(s.onSong ? s.title : "no song in Firefox").font(.system(size: 11)).foregroundStyle(Ink.dim).lineLimit(1))) {
@@ -733,12 +735,14 @@ struct SunoPanel: View {
                 clock("LEFT", s.ok ? Clock.mmss(s.remaining) : "-:--")
                 clock("SONG", s.ok ? Clock.mmss(s.d) : "-:--")
                 Spacer()
-                Button(r.recording ? "RECORDING" : "REC SONG") {
+                Button(r.recording ? "RECORDING" : (armed ? "WAITING FOR PLAY" : (failed ? "Record again" : "Record Suno song"))) {
                     guard !r.recording, s.onSong else { return }
-                    let ss = SunoSession(r); session = ss
+                    let ss = SunoSession(r); session = ss; armed = true
                     DispatchQueue.global().async {
-                        let t = ss.recordSong(log: { n in DispatchQueue.main.async { note = n } })
+                        let t = ss.recordWhenPressed(log: { n in DispatchQueue.main.async { note = n } })
                         DispatchQueue.main.async {
+                            armed = false; failed = (t == nil)
+                            if t == nil { note = "FAILED, take deleted: " + (ss.failure ?? "unknown") + ". Press Record again."; return }
                             guard let t = t else { return }
                             let dir = URL(fileURLWithPath: NSHomeDirectory() + "/Music/Suno"); try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                             let name = s.title.replacingOccurrences(of: "/", with: "-") + ".wav"
@@ -746,10 +750,10 @@ struct SunoPanel: View {
                         }
                     }
                 }
-                .disabled(r.recording || !s.onSong).accessibilityIdentifier("sunorec")
+                .disabled(r.recording || armed || !s.onSong).accessibilityIdentifier("sunorec")
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
-            Text(note.isEmpty ? "Takes Firefox's own sound (Screen Recording), the system audio is never touched. Stops by itself at the song's end." : note)
+            Text(note.isEmpty ? "Takes Firefox's own sound (Screen Recording), the system audio is never touched. Press the button, then press play in Suno: it records by itself and stops at the song's end, so the next song never starts." : note)
                 .font(.system(size: 11)).foregroundStyle(Ink.dim).fixedSize(horizontal: false, vertical: true).padding(.horizontal, 14).padding(.bottom, 8)
         }
         .onAppear { watch.start() }

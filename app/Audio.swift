@@ -531,7 +531,10 @@ final class Recorder: ObservableObject {
     // ---------------------------------------------------------------- recording
     func toggleRecord() { recording ? stopRecording() : record() }
 
-    func record() {
+    /// a take that did not finish is deleted from the session, never kept
+    func discard(_ t: Take) { takes.removeAll { $0.id == t.id }; if let u = t.savedTo { try? FileManager.default.removeItem(at: u) } }
+
+    func record(preroll: Double = 0) {
         guard !recording else { return }
         guard inProc != nil || appReady else { if !inUID.hasPrefix("app:") { Permissions.openMissing() }; return }
         pause()
@@ -540,7 +543,7 @@ final class Recorder: ObservableObject {
         t.l.reserveCapacity(Int(inRate) * 60); t.r.reserveCapacity(Int(inRate) * 60)
         current = t
         blockMax = 0; blockN = 0
-        readPos = ring.fill()
+        readPos = max(0, ring.fill() - Int64(preroll * inRate))
         recording = true
         RecordingFlag.set(true)
     }
