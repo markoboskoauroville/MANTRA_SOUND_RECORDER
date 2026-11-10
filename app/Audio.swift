@@ -452,14 +452,14 @@ final class Recorder: ObservableObject {
     func permissionsChanged() { if live && inProc == nil { startInput() } }
 
     // ---------------------------------------------------------------- the input
-    private var tap: AppTap?
+    private var tap: AppSource?
     /// 10.11.2026 (task 89): Firefox's own sound through ScreenCaptureKit, in place of a device. The system's output and
     /// input are never touched, so the voice engine (its own process) can never get into the take.
     var appGain: Float = 0.708                         // -3 dB headroom: the Suno masters peak at 0 dBFS
     @Published private(set) var appError: String?
 
     private func startApp() {
-        let t = AppTap { [weak self] l, r, n in
+        let sinkFn: (UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void = { [weak self] l, r, n in
             guard let self = self else { return }
             let g = self.appGain
             var pl: Float = 0, pr: Float = 0
@@ -468,11 +468,15 @@ final class Recorder: ObservableObject {
             self.ring.write(ml, mr, n); ml.deallocate(); mr.deallocate()
             self.rawInL = max(self.rawInL, pl); self.rawInR = max(self.rawInR, pr)
         }
+        let bundle = String(self.inUID.dropFirst(4))
+        // v14: Chrome plays everything from its AudioService helper, which ScreenCaptureKit does not give to Chrome:
+        // a CoreAudio process tap on all of Chrome's processes. Other apps keep ScreenCaptureKit (as OBS).
+        let t: AppSource = ProcTap.wanted(bundle) ? ProcTap(sink: sinkFn) : AppTap(sink: sinkFn)
         tap = t
         inRate = 48000
         Task { @MainActor in
-            do { try await t.start(bundle: String(self.inUID.dropFirst(4))); self.appError = nil; self.error = nil }
-            catch { self.appError = "\(self.inUID.contains("Chrome") ? "Chrome" : "Firefox") audio would not start: \(error.localizedDescription). Screen Recording must be allowed for this app."
+            do { try await t.start(bundle: bundle); self.inRate = t.rate; self.appError = nil; self.error = nil }
+            catch { self.appError = "\(self.inUID.contains("Chrome") ? "Chrome" : "Firefox") audio would not start: \(error.localizedDescription). \(t is ProcTap ? "System Audio Recording" : "Screen Recording") must be allowed for this app."
                     self.error = self.appError; self.tap = nil }
         }
     }
@@ -882,10 +886,18 @@ enum RecordingFlag {
 }
 
 /// One app's sound through ScreenCaptureKit (macOS 13+): planar or interleaved float frames to the ring.
-final class AppTap: NSObject, SCStreamOutput, SCStreamDelegate {
+protocol AppSource: AnyObject {
+    var running: Bool { get }
+    var rate: Double { get }
+    func start(bundle: String) async throws
+    func stop()
+}
+
+final class AppTap: NSObject, SCStreamOutput, SCStreamDelegate, AppSource {
     private var stream: SCStream?
     private let sink: (UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void
     private(set) var running = false
+    let rate: Double = 48000
     private let q = DispatchQueue(label: "apptap")
     init(sink: @escaping (UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void) { self.sink = sink }
 

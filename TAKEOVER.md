@@ -1,6 +1,6 @@
 # TAKEOVER: Sound Recorder (Mantra)
 
-**Version 13** (10.11.2026, task 99: Chrome app capture, the Chrome channel) · Version 12 (10.11.2026, task 89: Firefox app capture, Suno panel) · Version 11 (1.11.2026) · **closed by Marko 1.11.2026** (before: closed at v8, 31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
+**Version 14** (10.11.2026, task 99: Chrome through a CoreAudio process tap) · Version 13 (10.11.2026: the Chrome channel) · Version 12 (10.11.2026, task 89: Firefox app capture, Suno panel) · Version 11 (1.11.2026) · **closed by Marko 1.11.2026** (before: closed at v8, 31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
 `/Applications/Sound Recorder (Mantra).app`, bundle id `community.auroville.mantrasoundrecorder`.
 The reasons behind the choices are in [LESSONS.md](LESSONS.md).
 
@@ -146,8 +146,8 @@ voice engine to adam audio out so it doesnt become a part of record".
 Marko moved Suno to Chrome (Cloudflare kept stopping Firefox). The capture is the same as OBS's
 (obs-studio plugins/mac-capture/mac-sck-audio-capture.m: `SCContentFilter initWithDisplay:includingApplications:`,
 `capturesAudio`, `excludesCurrentProcessAudio`, 2 channels); `AppTap` already did exactly that, so Chrome needed no new
-capture code: `record.app {"bundle":"com.google.Chrome"}`. Chrome's audio comes from its helper processes and
-ScreenCaptureKit gives it to the parent app, as it does for OBS.
+capture code: `record.app {"bundle":"com.google.Chrome"}`. **Wrong, corrected in v14:** the SCK capture of Chrome was
+silent (peak -100 dBFS on a playing song).
 
 - Input menu: "Chrome audio (app capture, no BlackHole)" (`Recorder.chromeUID`) beside Firefox.
 - The door reads the body by Content-Length (long lyrics), answers OPTIONS and sends CORS headers.
@@ -156,3 +156,19 @@ ScreenCaptureKit gives it to the parent app, as it does for OBS.
 - **The Chrome channel** (door functions): `chrome.send {cmd,args}` → id, `chrome.result {id}`, `chrome.state`;
   the extension calls `chrome.poll {state}` once a second and `chrome.reply {id,result}`. The extension is
   Suno Controller (Mantra), repo CHROME_SUNO_CONTROLLER; the CLI on this side is `sunoctl`.
+
+
+## v14 (10.11.2026, task 99): Chrome through a CoreAudio process tap
+
+Chrome renders every tab's sound in its AudioService helper ("Google Chrome Helper (Aperitif)", `--utility-sub-type=
+audio.mojom.AudioService`, bundle com.google.Chrome.helper). ScreenCaptureKit does not list that helper as an
+application and does not give its sound to Chrome, so v13's capture of Chrome was silence. v14 adds `ProcTap`
+(app/ProcTap.swift): every CoreAudio process object whose bundle id starts with `com.google.Chrome` (the app and its
+helpers) goes into one `CATapDescription(stereoMixdownOfProcesses:)`, private, unmuted (Chrome keeps sounding), read
+through a private aggregate device on the default output's clock with an IOProc into the ring. No device is changed.
+Firefox (and other single-process apps) keep ScreenCaptureKit (`AppSource` protocol, `ProcTap.wanted(bundle)`).
+
+- Permission: **System Audio Recording** (`NSAudioCaptureUsageDescription`). The first tap shows "Would Like Access to
+  Record Your System Audio"; Marko pressed Allow on 10.11.2026. While that prompt waits, `AudioDeviceCreateIOProcIDWithBlock`
+  blocks on the main thread and the door stops answering (seen); the take then fails after 15 s.
+- Measured 10.11.2026: 5.1 s of a playing Suno song, peak -6.3 dBFS. The whole-song proof is in CHROME_SUNO_CONTROLLER.

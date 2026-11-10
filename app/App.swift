@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 13
+let VERSION = 14
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {

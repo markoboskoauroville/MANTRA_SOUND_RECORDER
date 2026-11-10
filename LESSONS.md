@@ -97,3 +97,11 @@ Appended, never rewritten. Newest last.
   once. Start every job empty.
 - A relaunch was held back by 3 takes that were all already on disk (door jobs write their WAV): checked the files
   before using `relaunch.swift --force`.
+
+## 10.11.2026 (v14)
+
+- "Do it like OBS" was not enough for Chrome: ScreenCaptureKit's per-app filter misses Chrome's AudioService helper,
+  the probe was silent although the song played. Measure the peak of a real take before calling a source done
+  (a 3 s probe of nothing proves only that the stream starts).
+- CoreAudio process taps (macOS 14.2+) take a list of processes, so an app whose sound comes from helpers is tapped by
+  bundle prefix. The consent prompt blocks inside AudioDeviceCreateIOProcIDWithBlock until answered.
