@@ -118,11 +118,12 @@ struct TopRow: View {
                     .contentShape(Rectangle()).onTapGesture { onTop.toggle(); TopRow.float(onTop) }
                     .axButton("Top", id: "top", value: onTop ? "on" : "off") { onTop.toggle(); TopRow.float(onTop) }
                     .help("Always on top: green, the window stays above every other window")
-                if !missing.isEmpty {
-                    Text("PERMISSIONS").foregroundStyle(Ink.amber)
-                        .contentShape(Rectangle()).onTapGesture { Permissions.openMissing() }
-                        .axButton("Permissions", id: "permissions") { Permissions.openMissing() }
-                        .help("The microphone is not allowed yet: a click opens its page in System Settings")
+                // v12: one amber button per missing permission, checked at every run; it opens exactly that pane and disappears once granted
+                ForEach(missing, id: \.self) { m in
+                    Text(m.uppercased()).foregroundStyle(Ink.amber)
+                        .contentShape(Rectangle()).onTapGesture { Permissions.open(m) }
+                        .axButton("Permission " + m, id: "permission-" + m) { Permissions.open(m) }
+                        .help("\(m) is not allowed yet: a click opens its page in System Settings")
                 }
                 Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.grey)
                     .frame(width: 28, height: 28).contentShape(Rectangle())

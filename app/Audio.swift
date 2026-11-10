@@ -841,23 +841,26 @@ final class Recorder: ObservableObject {
 
 // MANTRA_MANIFEST swift-apps.md, PERMISSIONS: the one this app uses is the microphone (every input device, BlackHole too).
 enum Permissions {
-    static let needed = ["Microphone"]
+    /// what this run needs: Screen Recording for the Firefox capture, the Microphone for a real input device
+    static var needed: [String] {
+        UserDefaults.standard.string(forKey: "input") == Recorder.fireUID ? ["Screen Recording"] : ["Microphone"]
+    }
     static func allowed(_ p: String) -> Bool {
         switch p {
         case "Microphone": return AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        case "Screen Recording": return CGPreflightScreenCaptureAccess()
         default: return true
         }
     }
     static var missing: [String] { needed.filter { !allowed($0) } }
-    static func openMissing() {
-        guard let p = missing.first else { return }
-        if p == "Microphone" {
-            if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
-                AVCaptureDevice.requestAccess(for: .audio) { _ in }      // the system's own question, once
-                return
-            }
+    static func openMissing() { if let p = missing.first { open(p) } }
+    static func open(_ p: String) {
+        if p == "Microphone", AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            AVCaptureDevice.requestAccess(for: .audio) { _ in }      // the system's own question, once
+            return
         }
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_" + p)!)
+        let pane = p == "Screen Recording" ? "ScreenCapture" : p
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_" + pane)!)
     }
 }
 

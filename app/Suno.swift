@@ -24,6 +24,17 @@ enum Firefox {
         if p.isRunning { p.terminate() }
         return String(data: o.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
+    static func runTool(_ name: String, _ args: [String]) -> String {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: NSHomeDirectory() + "/.local/bin/" + name); p.arguments = args
+        var env = ProcessInfo.processInfo.environment; env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (env["PATH"] ?? "")
+        p.environment = env
+        let o = Pipe(); p.standardOutput = o; p.standardError = Pipe()
+        do { try p.run() } catch { return "" }
+        let end = Date().addingTimeInterval(30)
+        while p.isRunning && Date() < end { Thread.sleep(forTimeInterval: 0.05) }
+        if p.isRunning { p.terminate() }
+        return String(data: o.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    }
     static func eval(_ js: String) -> String { run(["-t", "suno", "eval", js]) }
 
     static let probeJS = """
@@ -81,7 +92,11 @@ final class SunoSession: ObservableObject {
         guard DispatchQueue.main.sync(execute: { r.appReady }) else { log("Firefox audio did not start: \(DispatchQueue.main.sync { r.error ?? "?" })"); return nil }
         if s.ok { _ = Firefox.eval(Firefox.pauseJS); Thread.sleep(forTimeInterval: 0.5) }
         DispatchQueue.main.sync { r.record() }
-        if startPlayback { _ = Firefox.eval(Firefox.restartJS) }
+        if startPlayback {
+            _ = Firefox.eval(Firefox.restartJS)
+            Thread.sleep(forTimeInterval: 1.5)
+            if !Firefox.probe().playing { log("autoplay refused: real click"); _ = Firefox.run(["-t", "suno", "eval", "1"], timeout: 5); _ = Firefox.runTool("suno_play", ["play"]) }
+        }
         running = true
         var lastLog = Date.distantPast
         var seenPlaying = false, idle = 0
