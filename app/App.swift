@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 16
+let VERSION = 17
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -181,6 +181,7 @@ struct DevicesPanel: View {
                       extra: AnyView(AutoGainKey(r: r)), iconOn: r.monitorOn,
                       iconToggle: { withAnimation(.easeOut(duration: 0.2)) { r.toggleMonitor() } }) { r.chooseInput($0) }
             if r.monitorOn { MonitorRow(r: r).transition(.opacity.combined(with: .move(edge: .top))) }
+            FormatRow(r: r)
             if let n = r.gainNote {
                 Text(n).font(.system(size: 11, design: .monospaced)).foregroundStyle(r.gain == .failed ? Ink.amber : Ink.text)
                     .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 14).padding(.top, 6)
@@ -220,6 +221,54 @@ struct MonitorRow: View {
         .padding(.horizontal, 14).padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Ink.rowGreen.opacity(0.45))
+    }
+}
+
+/// v17 (Marko, 24.11.2026: "options of Sound Recorder quality, number of bits, and sample rate"): the recording format under
+/// the Input row: a quality preset, the bits of the saved WAV, the input's sample rate; locked while recording.
+struct FormatRow: View {
+    @ObservedObject var r: Recorder
+    var rates: [Double] {
+        var l = r.availRates
+        if r.recRate > 0 && !l.contains(r.recRate) { l.append(r.recRate); l.sort() }
+        return l
+    }
+    func bitsLabel(_ b: Int) -> String { b == 32 ? "32 bit float" : "\(b) bit" }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Spacer().frame(width: 28)
+                Text("Format").font(.system(size: 13)).foregroundStyle(Ink.text).frame(width: 62, alignment: .leading)
+                Picker("", selection: Binding(get: { r.recQuality }, set: { r.setQuality($0) })) {
+                    ForEach(Recorder.presets, id: \.id) { p in Text(p.name).tag(p.id) }
+                    Text("Custom").tag("custom")
+                }
+                .labelsHidden().pickerStyle(.menu).disabled(r.recording)
+                .accessibilityLabel("Quality").accessibilityIdentifier("quality")
+                Picker("", selection: Binding(get: { r.recBits }, set: { r.setBits($0) })) {
+                    ForEach(Recorder.bitOptions, id: \.self) { b in Text(bitsLabel(b)).tag(b) }
+                }
+                .labelsHidden().pickerStyle(.menu).disabled(r.recording).frame(width: 110)
+                .accessibilityLabel("Bits").accessibilityIdentifier("bits")
+                Picker("", selection: Binding(get: { r.recRate }, set: { r.setRate($0) })) {
+                    Text("Auto (\(r.rateLabel(r.inRate)))").tag(0.0)
+                    ForEach(rates, id: \.self) { x in Text(r.rateLabel(x)).tag(x) }
+                }
+                .labelsHidden().pickerStyle(.menu).disabled(r.recording || r.rateLocked).frame(width: 130)
+                .accessibilityLabel("Sample rate").accessibilityIdentifier("rate")
+            }
+            Text(r.sizeText).font(.system(size: 11, design: .monospaced)).foregroundStyle(Ink.dim).padding(.leading, 40)
+            if r.rateLocked {
+                Text("App audio runs at its own fixed rate (\(r.rateLabel(r.inRate))): the rate menu is off.")
+                    .font(.system(size: 11)).foregroundStyle(Ink.dim).padding(.leading, 40)
+            }
+            if let n = r.rateNote {
+                Text(n).font(.system(size: 11)).foregroundStyle(Ink.amber).fixedSize(horizontal: false, vertical: true).padding(.leading, 40)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Ink.rowGreen.opacity(0.3))
     }
 }
 
@@ -552,11 +601,16 @@ struct AutoGainKey: View {
 /// vN, plain and dim, a hidden link to the latest build (version-visible.md). v7: no QUIT (Marko, 31.10.2026: "keep the
 /// on off and remove quit"); OFF on the first row quits.
 struct Footer: View {
+    @ObservedObject var up = Updater.shared
     var body: some View {
         HStack {
             Text("v\(VERSION)").font(.system(size: 11, design: .monospaced)).foregroundStyle(Ink.dim)
                 .onTapGesture { NSWorkspace.shared.open(RELEASES) }
                 .axButton("Version \(VERSION)", id: "version") { NSWorkspace.shared.open(RELEASES) }
+            if !up.status.isEmpty {
+                Text(up.status).font(.system(size: 11)).foregroundStyle(Ink.dim)
+                    .accessibilityIdentifier("update-status")
+            }
             Spacer()
         }
     }
@@ -583,6 +637,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
     private var keys: Any?
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
+        if CommandLine.arguments.count == 1 { Updater.shared.checkAtStart() }     // v17: the app replaces itself (not in the test modes)
         Door.shared.start()          // v12: the Star API functions on 127.0.0.1:8869
         // R records, Space plays; with ⌘ the menus keep their keys
         keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
@@ -597,7 +652,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { false }
     func applicationShouldHandleReopen(_ s: NSApplication, hasVisibleWindows flag: Bool) -> Bool { true }
-    func applicationWillTerminate(_ n: Notification) { REC.forget() }
+    func applicationWillTerminate(_ n: Notification) { Updater.shared.installOnQuit(); REC.forget() }
 }
 
 struct RecorderApp: App {

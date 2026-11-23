@@ -50,6 +50,29 @@ enum Devices {
         return r > 0 ? r : 48000
     }
 
+    /// v17: the usual rates this device really offers (kAudioDevicePropertyAvailableNominalSampleRates), ascending
+    static let standardRates: [Double] = [44100, 48000, 88200, 96000, 176400, 192000]
+    static func supportedRates(_ id: AudioDeviceID) -> [Double] {
+        var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyAvailableNominalSampleRates, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(id, &a, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var rs = [AudioValueRange](repeating: AudioValueRange(), count: Int(size) / MemoryLayout<AudioValueRange>.size)
+        guard AudioObjectGetPropertyData(id, &a, 0, nil, &size, &rs) == noErr else { return [] }
+        return standardRates.filter { s in rs.contains { s >= $0.mMinimum - 0.5 && s <= $0.mMaximum + 0.5 } }
+    }
+
+    /// v17: asks the device for a nominal rate and waits up to half a second for it to say it took it
+    static func setRate(_ id: AudioDeviceID, _ want: Double) -> Bool {
+        var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var v = Float64(want)
+        guard AudioObjectSetPropertyData(id, &a, 0, nil, UInt32(MemoryLayout<Float64>.size), &v) == noErr else { return false }
+        for _ in 0..<20 {
+            if abs(rate(id) - want) < 0.5 { return true }
+            Thread.sleep(forTimeInterval: 0.025)
+        }
+        return abs(rate(id) - want) < 0.5
+    }
+
     private static func u32(_ obj: AudioObjectID, _ sel: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope) -> Int {
         var a = AudioObjectPropertyAddress(mSelector: sel, mScope: scope, mElement: kAudioObjectPropertyElementMain)
         var v = UInt32(0); var sz = UInt32(4)
@@ -250,13 +273,15 @@ struct Meter {
 final class Take: Identifiable {
     let id: Int
     let rate: Double
+    /// v17: the bit depth SAVE writes (16, 24, or 32 = float), fixed when the take starts
+    let bits: Int
     var l: [Float] = [], r: [Float] = []
     var peaks: [Float] = []
     var cursor: Double = 0
     /// v5: where SAVE last wrote it
     var savedTo: URL?
     let made = Date()
-    init(id: Int, rate: Double) { self.id = id; self.rate = rate }
+    init(id: Int, rate: Double, bits: Int = 24) { self.id = id; self.rate = rate; self.bits = bits }
     var frames: Int { l.count }
     var seconds: Double { Double(frames) / rate }
     var position: Double { cursor / rate }
@@ -365,6 +390,24 @@ final class Recorder: ObservableObject {
     private var monChunk = 0                         // the writer's last chunk, in frames
     private var mPos: Double = 0, mStep: Double = 1, mPrimed = false   // the reader's own state
 
+    // v17, RECORDING FORMAT (Marko, 24.11.2026: "options of Sound Recorder quality, number of bits, and sample rate"):
+    // bits 16 / 24 / 32 float for the saved WAV, the input's sample rate (0 = Auto: whatever the device runs at), and a
+    // quality preset that sets both. The take is held as 32-bit float; the bits are applied when SAVE writes it.
+    static let bitOptions = [16, 24, 32]
+    struct Preset { let id: String, name: String, bits: Int, rate: Double }
+    static let presets: [Preset] = [
+        Preset(id: "cd", name: "CD: 16 bit / 44.1 kHz", bits: 16, rate: 44100),
+        Preset(id: "standard", name: "Standard: 24 bit / 48 kHz", bits: 24, rate: 48000),
+        Preset(id: "studio", name: "Studio: 24 bit / 96 kHz", bits: 24, rate: 96000),
+        Preset(id: "max", name: "Max: 32 bit float / 192 kHz (or the device's top)", bits: 32, rate: 192000),
+    ]
+    @Published private(set) var recBits = 24
+    @Published private(set) var recRate: Double = 0
+    @Published private(set) var recQuality = "custom"
+    @Published private(set) var rateNote: String?
+    @Published private(set) var availRates: [Double] = []
+    var rateLocked: Bool { inUID.hasPrefix("app:") }
+
     // v3: auto gain
     @Published private(set) var gain: GainStep = .idle
     @Published private(set) var gainNote: String?
@@ -384,6 +427,11 @@ final class Recorder: ObservableObject {
         if d.object(forKey: "inGain") != nil { inSoft = d.float(forKey: "inGain") }
         if d.object(forKey: "outGain") != nil { outSoft = d.float(forKey: "outGain") }
         if d.object(forKey: "inBoost") != nil { inBoost = min(max(d.float(forKey: "inBoost"), 1), Self.maxBoost) }
+        if live {
+            if d.object(forKey: "recBits") != nil, Self.bitOptions.contains(d.integer(forKey: "recBits")) { recBits = d.integer(forKey: "recBits") }
+            if d.object(forKey: "recRate") != nil { let r = d.double(forKey: "recRate"); recRate = Devices.standardRates.contains(r) ? r : 0 }
+            if let q = d.string(forKey: "recQuality"), q == "custom" || Self.presets.contains(where: { $0.id == q }) { recQuality = q }
+        }
         monW.initialize(to: 0); monL.initialize(repeating: 0, count: Self.monCap); monR.initialize(repeating: 0, count: Self.monCap)
         if live {
             monitorOn = d.bool(forKey: "monitorOn")
@@ -546,6 +594,7 @@ final class Recorder: ObservableObject {
         let t: AppSource = ProcTap.wanted(bundle) ? ProcTap(sink: sinkFn) : AppTap(sink: sinkFn)
         tap = t
         inRate = 48000
+        availRates = []; rateNote = nil
         Task { @MainActor in
             do { try await t.start(bundle: bundle); self.inRate = t.rate; self.appError = nil; self.error = nil }
             catch { self.appError = "\(self.inUID.contains("Chrome") ? "Chrome" : "Firefox") audio would not start: \(error.localizedDescription). \(t is ProcTap ? "System Audio Recording" : "Screen Recording") must be allowed for this app."
@@ -560,6 +609,7 @@ final class Recorder: ObservableObject {
         stopInput()
         defer { applyMonitor() }
         if inUID.hasPrefix("app:") { guard live else { return }; startApp(); return }
+        if live { applyRate() }
         guard live, !inUID.hasPrefix("app:"), Permissions.allowed("Microphone"),
               let dev = inputs.first(where: { $0.uid == inUID }) else { return }
         inDev = dev.id
@@ -618,7 +668,8 @@ final class Recorder: ObservableObject {
         guard inProc != nil || appReady else { if !inUID.hasPrefix("app:") { Permissions.openMissing() }; return }
         pause()
         stopAutoGain()
-        let t = Take(id: nextID, rate: inRate)
+        if let d = inputs.first(where: { $0.uid == inUID && $0.id != 0 }), !inUID.hasPrefix("app:") { inRate = Devices.rate(d.id) }   // v17: the rate the device really runs at
+        let t = Take(id: nextID, rate: inRate, bits: recBits)
         t.l.reserveCapacity(Int(inRate) * 60); t.r.reserveCapacity(Int(inRate) * 60)
         current = t
         blockMax = 0; blockN = 0
@@ -856,6 +907,86 @@ final class Recorder: ObservableObject {
         if !notes.isEmpty { monitorNote = notes.joined(separator: "; ") + "." }
     }
 
+    // ---------------------------------------------------------------- v17: the recording format
+    /// the rate a take would have now: the chosen one when the device took it, else what the input runs at
+    var effectiveRate: Double { inRate }
+
+    /// "about 17 MB per minute, stereo"
+    var sizeText: String {
+        let mb = effectiveRate * 2 * Double(recBits / 8) * 60 / 1_000_000
+        return String(format: "about %.0f MB per minute, stereo", mb)
+    }
+
+    func rateLabel(_ r: Double) -> String { String(format: "%g kHz", r / 1000) }
+    var qualityName: String { Self.presets.first(where: { $0.id == recQuality })?.name ?? "Custom" }
+
+    private func saveFormat() {
+        guard live else { return }
+        let d = UserDefaults.standard
+        d.set(recBits, forKey: "recBits"); d.set(recRate, forKey: "recRate"); d.set(recQuality, forKey: "recQuality")
+    }
+
+    /// the quality that bits and rate add up to: a preset when they match one, else custom
+    private func matchQuality() -> String {
+        for p in Self.presets {
+            let rate = p.id == "max" ? (availRates.max() ?? p.rate) : p.rate
+            if p.bits == recBits && recRate == rate { return p.id }
+        }
+        return "custom"
+    }
+
+    func setBits(_ b: Int) {
+        guard !recording, Self.bitOptions.contains(b) else { return }
+        recBits = b; recQuality = matchQuality(); saveFormat()
+    }
+
+    /// 0 = Auto. The input device (and the output device, when it offers the rate) is asked to run at it.
+    func setRate(_ r: Double) {
+        guard !recording, !rateLocked else { return }
+        recRate = r; recQuality = matchQuality(); saveFormat()
+        applyRateNow()
+    }
+
+    func setQuality(_ id: String) {
+        guard !recording else { return }
+        guard let p = Self.presets.first(where: { $0.id == id }) else { recQuality = "custom"; saveFormat(); return }
+        recBits = p.bits
+        if !rateLocked {
+            let want = id == "max" ? (availRates.max() ?? p.rate) : p.rate
+            // the nearest rate the input really offers, when it does not offer this one
+            recRate = availRates.isEmpty || availRates.contains(want) ? want : (availRates.min(by: { abs($0 - want) < abs($1 - want) }) ?? want)
+        }
+        recQuality = id; saveFormat()
+        if !rateLocked { applyRateNow() }
+    }
+
+    private func applyRateNow() {
+        guard live else { return }
+        pause(restart: false)                       // a take playing keeps its own step: stop it before a device changes rate
+        if inUID.hasPrefix("app:") { return }
+        stopAutoGain()
+        startInput()                                // applies the rate, reads it back, restarts the monitoring
+    }
+
+    /// reads what the input offers, sets the chosen rate on it (and on the output when it offers it), reads the real rate back
+    private func applyRate() {
+        rateNote = nil
+        guard let d = inputs.first(where: { $0.uid == inUID && $0.id != 0 }) else { availRates = []; return }
+        availRates = Devices.supportedRates(d.id)
+        inRate = Devices.rate(d.id)
+        guard recRate > 0 else { return }
+        if abs(inRate - recRate) > 0.5 {
+            if !(availRates.contains(recRate) && Devices.setRate(d.id, recRate)) {
+                rateNote = "The input would not switch to \(rateLabel(recRate)); it runs at \(rateLabel(Devices.rate(d.id)))."
+            }
+            inRate = Devices.rate(d.id)
+        }
+        if let od = outputs.first(where: { $0.uid == outUID && $0.id != 0 }), abs(Devices.rate(od.id) - recRate) > 0.5,
+           Devices.supportedRates(od.id).contains(recRate) {
+            _ = Devices.setRate(od.id, recRate)     // an output that will not follow is resampled as before
+        }
+    }
+
     // ---------------------------------------------------------------- saving
     // v5 (Marko, 31.10.2026: "add the save button in upper right corner of each waveform"): SAVE asks where (the last
     // folder, at first ~/Music) and writes the take as it is: WAV, stereo, 24 bit, at the take's rate.
@@ -882,16 +1013,26 @@ final class Recorder: ObservableObject {
     }
 
     static func writeWAV(_ t: Take, to url: URL) throws {
+        let bits = Self.bitOptions.contains(t.bits) ? t.bits : 24
         let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: t.rate, AVNumberOfChannelsKey: 2,
-                                       AVLinearPCMBitDepthKey: 24, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false]
+                                       AVLinearPCMBitDepthKey: bits, AVLinearPCMIsFloatKey: bits == 32, AVLinearPCMIsBigEndianKey: false]
         let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
         let chunk = 65536
         guard let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(chunk)) else { return }
         var at = 0
+        var seed: UInt32 = 2463534242                       // xorshift for the dither
+        func rnd() -> Float { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return Float(seed) / 4294967296.0 }
         while at < t.frames {
             let n = min(chunk, t.frames - at)
             t.l.withUnsafeBufferPointer { buf.floatChannelData![0].update(from: $0.baseAddress! + at, count: n) }
             t.r.withUnsafeBufferPointer { buf.floatChannelData![1].update(from: $0.baseAddress! + at, count: n) }
+            if bits == 16 {                                  // v17: TPDF dither, +-1 LSB, before the cut to 16 bit
+                let lsb: Float = 1.0 / 32768.0
+                for c in 0..<2 {
+                    let p = buf.floatChannelData![c]
+                    for i in 0..<n { p[i] = min(max(p[i] + (rnd() - rnd()) * lsb, -1), 1) }
+                }
+            }
             buf.frameLength = AVAudioFrameCount(n)
             try file.write(from: buf)
             at += n

@@ -112,3 +112,9 @@ Appended, never rewritten. Newest last.
 - Monitoring cannot be zero delay on the Mac: the round trip is input latency + safety offset + input buffer + the ring + output buffer + output latency. The ring must hold one input chunk plus one output buffer or the two devices' unaligned callbacks underrun; so a chosen buffer of B frames costs about 4 B plus the devices' own latency, and the window's estimate line says it.
 - One output IOProc serves the take and the monitor; stop it before freeing the take's memory (AudioDeviceStop waits for the running callback), then make it again for monitoring.
 - A lock-free ring in Swift without the Atomics package: aligned 64-bit counter plus OSMemoryBarrier() between the data and the counter.
+
+
+## 24.11.2026 (v17)
+
+- Changing a device's nominal rate is asynchronous: set it, then poll the read-back (up to 0.5 s) before opening the IOProc; the take's rate is the rate read back, never the one asked for.
+- A self-updater must never quit an app that holds unsaved memory: install at once only with no takes, otherwise at the quit.

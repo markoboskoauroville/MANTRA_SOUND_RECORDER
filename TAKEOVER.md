@@ -1,6 +1,6 @@
 # TAKEOVER: Sound Recorder (Mantra)
 
-**Version 16** (24.11.2026: input monitoring, built by GitHub Actions) · Version 15 (10.11.2026: "App audio (<app>)" inputs, BlackHole not offered) · Version 14 (10.11.2026, task 99: Chrome through a CoreAudio process tap) · Version 13 (10.11.2026: the Chrome channel) · Version 12 (10.11.2026, task 89: Firefox app capture, Suno panel) · Version 11 (1.11.2026) · **closed by Marko 1.11.2026** (before: closed at v8, 31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
+**Version 17** (24.11.2026: recording format Quality / Bits / Sample rate, automatic self-update) · Version 16 (24.11.2026: input monitoring, built by GitHub Actions) · Version 15 (10.11.2026: "App audio (<app>)" inputs, BlackHole not offered) · Version 14 (10.11.2026, task 99: Chrome through a CoreAudio process tap) · Version 13 (10.11.2026: the Chrome channel) · Version 12 (10.11.2026, task 89: Firefox app capture, Suno panel) · Version 11 (1.11.2026) · **closed by Marko 1.11.2026** (before: closed at v8, 31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
 `/Applications/Sound Recorder (Mantra).app`, bundle id `community.auroville.mantrasoundrecorder`.
 The reasons behind the choices are in [LESSONS.md](LESSONS.md).
 
@@ -30,9 +30,11 @@ Input row, each with its meter and device menu.
   boost goes first. The slider is the indicator: it follows the auto gain. Boost saved in defaults as `inBoost`.
   `--slider-test <input>` sets positions and reads the dB back.
 - **Input monitoring (v16, 24.11.2026)**: the Input row's mic tile is a switch (AX button `monitor`, label "Input monitoring"; green when on; UserDefaults `monitorOn`, off by default). On, a row opens under the Input row: "Monitoring buffer" with a menu of 32 / 64 / 128 / 256 / 512 / 1024 frames, each with its milliseconds at the input's rate (`monitorBuf`, default 128), a dim "about N ms through your devices" line (latencies read from CoreAudio), an amber "feedback risk: use headphones" always, and an amber line when a device refuses or clamps the size.
+- **Format row (v17, 24.11.2026)**: under the Input (and monitoring) row, three menus with AX identifiers `quality`, `bits`, `rate`, locked while recording. Quality presets (CD 16/44.1, Standard 24/48, Studio 24/96, Max 32 float/192 or the device's top, Custom when bits and rate match none; `recQuality`), Bits 16 / 24 / 32 float (`recBits`, default 24; applied by SAVE, 16 bit with TPDF dither; the take is held as float and carries its bits from the moment it starts), Sample rate Auto (the device's) or a rate the input really offers (`recRate`, read from kAudioDevicePropertyAvailableNominalSampleRates; the input and, if it offers the rate, the output device are set; an amber line when the input refuses). A dim line gives the size per minute. App-audio inputs have a fixed rate: the rate menu is grey with a note. The take's rate is read back from the device when recording starts.
+- **Self-update (v17)**: app/Updater.swift (from kits/mac-updater, automatic, no question). At start (not in test modes) it reads the Latest release of the public repo through api.github.com (curl), downloads app.zip to ~/Library/Caches/<bundle id>/update, unpacks it; with no takes and no recording a detached script waits for the quit, signs "Mantra Apps", swaps it in and reopens; with takes it waits ("vN ready: installs when you quit", footer status next to vN, rechecked every 20 s) and swaps at quit (OFF / quit) without reopening. Footer status: checking, downloading, updating.
 - **Takes**: every recording of the session is its own waveform, numbered, oldest on top, with `position / length`.
   **A click on a waveform plays / pauses it** (there is no play key); **⌘-click jumps there and plays**. **SAVE** in each waveform's upper right corner opens a save dialog (the last
-  folder, at first ~/Music; name "Take N - d.M.yyyy HH.mm.wav") and writes WAV, stereo, 24 bit, at the take's rate;
+  folder, at first ~/Music; name "Take N - d.M.yyyy HH.mm.wav") and writes WAV, stereo, at the take's rate and bits (v17: 16 / 24 / 32 float, default 24);
   it then reads SAVED in green (hover: the path). One take plays
   at a time; each keeps its playhead. Below them the next take's empty row (red and growing while recording), then
   the record circle and "take N". Space plays / pauses the last played (or the newest).
@@ -187,3 +189,8 @@ says "the app's own sound (App audio)". `--inputs` prints the menu's entries (ch
 ## v16 (24.11.2026): input monitoring
 
 Marko: "Listen to me on the input when I click on the icon of the microphone ... a new drop-down menu opens below this line with buffer size and milliseconds so I can choose how much delay I want to hear. If you can do some magic to have zero delay, let me know." Described in The window and The model above. Zero delay is not possible through the Mac: the input buffer, the output buffer, the devices' own latency and safety offsets cannot be skipped (an interface's own direct monitoring knob is the zero-latency way). Not proven by ear yet (no sound was played on his speakers while building); the first test is Marko's, with headphones. Compiled only by GitHub Actions (.github/workflows/build.yml, release vN Latest); build.sh takes SIGN and NO_INSTALL for the runner.
+
+
+## v17 (24.11.2026): recording format and self-update
+
+Marko: "add to the interface options of Sound Recorder quality, number of bits, and sample rate." Described under The window. Written without a compiler (GitHub Actions only); the first self-update will be proven when v18 follows v17. The download of app.zip does not go on the Download Monitor (a few MB, by the app itself).
