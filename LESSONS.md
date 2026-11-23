@@ -105,3 +105,10 @@ Appended, never rewritten. Newest last.
   (a 3 s probe of nothing proves only that the stream starts).
 - CoreAudio process taps (macOS 14.2+) take a list of processes, so an app whose sound comes from helpers is tapped by
   bundle prefix. The consent prompt blocks inside AudioDeviceCreateIOProcIDWithBlock until answered.
+
+
+## 24.11.2026 (v16, input monitoring)
+
+- Monitoring cannot be zero delay on the Mac: the round trip is input latency + safety offset + input buffer + the ring + output buffer + output latency. The ring must hold one input chunk plus one output buffer or the two devices' unaligned callbacks underrun; so a chosen buffer of B frames costs about 4 B plus the devices' own latency, and the window's estimate line says it.
+- One output IOProc serves the take and the monitor; stop it before freeing the take's memory (AudioDeviceStop waits for the running callback), then make it again for monitoring.
+- A lock-free ring in Swift without the Atomics package: aligned 64-bit counter plus OSMemoryBarrier() between the data and the counter.

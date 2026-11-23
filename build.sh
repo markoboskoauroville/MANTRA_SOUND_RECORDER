@@ -36,7 +36,8 @@ for s in 16 32 128 256 512; do
   sips -z $((s*2)) $((s*2)) icon/icon_1024.png --out $I/icon_${s}x${s}@2x.png >/dev/null
 done
 iconutil -c icns $I -o "$APP/Contents/Resources/AppIcon.icns"
-codesign --force -s "Mantra Apps" "$APP"
+codesign --force -s "${SIGN:-Mantra Apps}" "$APP"
+[ -n "$NO_INSTALL" ] && { echo "built $APP (v$V), not installed (NO_INSTALL)"; exit 0; }
 rm -rf "/Applications/$NAME.app"; cp -R "$APP" /Applications/
 echo "built $APP (v$V) and installed it in /Applications"
 # v4: the running copy quit through Accessibility, the new one opened (tools/relaunch.swift); --no-run skips it

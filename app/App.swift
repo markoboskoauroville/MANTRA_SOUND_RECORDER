@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 15
+let VERSION = 16
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -178,7 +178,9 @@ struct DevicesPanel: View {
             DeviceRow(icon: "mic.fill", name: "Input", meter: r.inMeter,
                       volume: r.sliderPos(input: true), boost: r.inBoost, gain: r.gainDB(input: true), zeroAt: r.inZeroAt, onDevice: r.inOnDevice, setVolume: { r.setSlider(input: true, $0) },
                       devices: r.inputs, uid: r.inUID, enabled: !r.recording, fill: Ink.rowGreen,
-                      extra: AnyView(AutoGainKey(r: r))) { r.chooseInput($0) }
+                      extra: AnyView(AutoGainKey(r: r)), iconOn: r.monitorOn,
+                      iconToggle: { withAnimation(.easeOut(duration: 0.2)) { r.toggleMonitor() } }) { r.chooseInput($0) }
+            if r.monitorOn { MonitorRow(r: r).transition(.opacity.combined(with: .move(edge: .top))) }
             if let n = r.gainNote {
                 Text(n).font(.system(size: 11, design: .monospaced)).foregroundStyle(r.gain == .failed ? Ink.amber : Ink.text)
                     .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 14).padding(.top, 6)
@@ -189,6 +191,35 @@ struct DevicesPanel: View {
             }
             Spacer().frame(height: 6)
         }
+    }
+}
+
+/// v16: opens below the Input row while monitoring is on: the buffer (frames and ms at the input's rate), the real estimate
+struct MonitorRow: View {
+    @ObservedObject var r: Recorder
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 12) {
+                Spacer().frame(width: 28)
+                Text("Monitoring buffer").font(.system(size: 13)).foregroundStyle(Ink.text)
+                Spacer()
+                Picker("", selection: Binding(get: { r.monitorBuf }, set: { r.setMonitorBuf($0) })) {
+                    ForEach(Recorder.monitorSizes, id: \.self) { f in Text(r.bufferLabel(f)).tag(f) }
+                }
+                .labelsHidden().pickerStyle(.menu).frame(minWidth: 196, maxWidth: 240)
+                .accessibilityLabel("Monitoring buffer")
+            }
+            if let i = r.monitorInfo {
+                Text(i).font(.system(size: 11, design: .monospaced)).foregroundStyle(Ink.dim).padding(.leading, 40)
+            }
+            Text("feedback risk: use headphones").font(.system(size: 11)).foregroundStyle(Ink.amber).padding(.leading, 40)
+            if let n = r.monitorNote {
+                Text(n).font(.system(size: 11)).foregroundStyle(Ink.amber).fixedSize(horizontal: false, vertical: true).padding(.leading, 40)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Ink.rowGreen.opacity(0.45))
     }
 }
 
@@ -206,12 +237,23 @@ struct DeviceRow: View {
     let enabled: Bool
     let fill: Color
     var extra: AnyView = AnyView(EmptyView())
+    var iconOn = false                                  // v16: the Input row's mic is the input-monitoring switch
+    var iconToggle: (() -> Void)? = nil
     let choose: (String) -> Void
+
+    @ViewBuilder var iconTile: some View {
+        let tile = Image(systemName: icon).font(.system(size: 13)).foregroundStyle(iconOn ? Ink.ground : Ink.text)
+            .frame(width: 28, height: 28).background(RoundedRectangle(cornerRadius: 7).fill(iconOn ? Ink.green : Ink.tile))
+        if let t = iconToggle {
+            tile.contentShape(Rectangle()).onTapGesture { t() }
+                .axButton("Input monitoring", id: "monitor", value: iconOn ? "on" : "off") { t() }
+                .help("Input monitoring: hear the input through the output while you record (use headphones)")
+        } else { tile }
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: icon).font(.system(size: 13)).foregroundStyle(Ink.text)
-                .frame(width: 28, height: 28).background(RoundedRectangle(cornerRadius: 7).fill(Ink.tile))
+            iconTile
             Text(name).font(.system(size: 14)).foregroundStyle(Ink.text).frame(width: 62, alignment: .leading)
             extra
             VStack(spacing: 6) {

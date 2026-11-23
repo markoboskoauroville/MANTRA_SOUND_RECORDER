@@ -50,6 +50,49 @@ enum Devices {
         return r > 0 ? r : 48000
     }
 
+    private static func u32(_ obj: AudioObjectID, _ sel: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope) -> Int {
+        var a = AudioObjectPropertyAddress(mSelector: sel, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+        var v = UInt32(0); var sz = UInt32(4)
+        return AudioObjectGetPropertyData(obj, &a, 0, nil, &sz, &v) == noErr ? Int(v) : 0
+    }
+
+    /// v16: what the device and its first stream add on their own, in frames: latency + safety offset + stream latency
+    static func latencyFrames(_ id: AudioDeviceID, input: Bool) -> Int {
+        let scope = input ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput
+        var total = u32(id, kAudioDevicePropertyLatency, scope) + u32(id, kAudioDevicePropertySafetyOffset, scope)
+        var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        if AudioObjectGetPropertyDataSize(id, &a, 0, nil, &size) == noErr, size >= 4 {
+            var ids = [AudioObjectID](repeating: 0, count: Int(size) / 4)
+            if AudioObjectGetPropertyData(id, &a, 0, nil, &size, &ids) == noErr, let s = ids.first {
+                total += u32(s, kAudioStreamPropertyLatency, kAudioObjectPropertyScopeGlobal)
+            }
+        }
+        return total
+    }
+
+    /// v16: the device's buffer size range (frames), when it says it
+    static func bufferRange(_ id: AudioDeviceID) -> (Int, Int)? {
+        var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyBufferFrameSizeRange, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var r = AudioValueRange(); var sz = UInt32(MemoryLayout<AudioValueRange>.size)
+        guard AudioObjectGetPropertyData(id, &a, 0, nil, &sz, &r) == noErr, r.mMaximum >= r.mMinimum, r.mMaximum > 0 else { return nil }
+        return (Int(r.mMinimum), Int(r.mMaximum))
+    }
+
+    static func bufferFrames(_ id: AudioDeviceID) -> Int { u32(id, kAudioDevicePropertyBufferFrameSize, kAudioObjectPropertyScopeGlobal) }
+
+    /// v16: asks for `want` frames, clamped to the device's range; returns what the device now says, nil when it refused
+    static func setBuffer(_ id: AudioDeviceID, _ want: Int) -> Int? {
+        var n = want
+        if let r = bufferRange(id) { n = min(max(n, r.0), r.1) }
+        var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyBufferFrameSize, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var v = UInt32(n)
+        let st = AudioObjectSetPropertyData(id, &a, 0, nil, 4, &v)
+        let now = bufferFrames(id)
+        if st != noErr && now == 0 { return nil }
+        return now > 0 ? now : (st == noErr ? n : nil)
+    }
+
     private static func string(_ id: AudioDeviceID, _ sel: AudioObjectPropertySelector) -> String {
         var addr = AudioObjectPropertyAddress(mSelector: sel, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var s: Unmanaged<CFString>? = nil; var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
@@ -305,6 +348,23 @@ final class Recorder: ObservableObject {
     private var pDone = false
     private var rawOutL: Float = 0, rawOutR: Float = 0
 
+    // v16, INPUT MONITORING (Marko, 24.11.2026: "Listen to me on the input when I click on the icon of the microphone"):
+    // a second, lock-free ring (one writer: the input's audio thread, one reader: the output's) that the output IOProc mixes
+    // into what it plays. Nothing is allocated and no lock is taken on either thread; the counters are 64-bit words
+    // published with a memory barrier.
+    static let monitorSizes = [32, 64, 128, 256, 512, 1024]
+    @Published private(set) var monitorOn = false
+    @Published private(set) var monitorBuf = 128
+    @Published private(set) var monitorNote: String?
+    @Published private(set) var monitorInfo: String?
+    private static let monCap = 1 << 15, monMask = (1 << 15) - 1
+    private let monL = UnsafeMutablePointer<Float>.allocate(capacity: Recorder.monCap)
+    private let monR = UnsafeMutablePointer<Float>.allocate(capacity: Recorder.monCap)
+    private let monW = UnsafeMutablePointer<Int64>.allocate(capacity: 1)
+    private var monFlag = false                      // read by the audio threads
+    private var monChunk = 0                         // the writer's last chunk, in frames
+    private var mPos: Double = 0, mStep: Double = 1, mPrimed = false   // the reader's own state
+
     // v3: auto gain
     @Published private(set) var gain: GainStep = .idle
     @Published private(set) var gainNote: String?
@@ -324,6 +384,11 @@ final class Recorder: ObservableObject {
         if d.object(forKey: "inGain") != nil { inSoft = d.float(forKey: "inGain") }
         if d.object(forKey: "outGain") != nil { outSoft = d.float(forKey: "outGain") }
         if d.object(forKey: "inBoost") != nil { inBoost = min(max(d.float(forKey: "inBoost"), 1), Self.maxBoost) }
+        monW.initialize(to: 0); monL.initialize(repeating: 0, count: Self.monCap); monR.initialize(repeating: 0, count: Self.monCap)
+        if live {
+            monitorOn = d.bool(forKey: "monitorOn")
+            if d.object(forKey: "monitorBuf") != nil, Self.monitorSizes.contains(d.integer(forKey: "monitorBuf")) { monitorBuf = d.integer(forKey: "monitorBuf") }
+        }
         watchVolumes()
         timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(timer!, forMode: .common)
@@ -357,7 +422,7 @@ final class Recorder: ObservableObject {
         let i = pick(inUID, inputs, Devices.defaultDevice(input: true))
         let o = pick(outUID, outputs, Devices.defaultDevice(input: false))
         if i != inUID { if recording { stopRecording() }; stopAutoGain(); inUID = i; startInput() }
-        if o != outUID { pause(); outUID = o }
+        if o != outUID { pause(restart: false); outUID = o; applyMonitor() }
         watchVolumes()
     }
 
@@ -426,10 +491,11 @@ final class Recorder: ObservableObject {
     func chooseOutput(_ uid: String) {
         guard uid != outUID else { return }
         let was = playingTake
-        pause()
+        pause(restart: false)
         outUID = uid
         if live { UserDefaults.standard.set(uid, forKey: "output") }   // a test never changes his choice
         watchVolumes()
+        applyMonitor()
         if let t = was { play(t) }
     }
 
@@ -469,7 +535,9 @@ final class Recorder: ObservableObject {
             var pl: Float = 0, pr: Float = 0
             let ml = UnsafeMutablePointer<Float>.allocate(capacity: n), mr = UnsafeMutablePointer<Float>.allocate(capacity: n)
             for i in 0..<n { ml[i] = l[i] * g; mr[i] = r[i] * g; pl = max(pl, abs(ml[i])); pr = max(pr, abs(mr[i])) }
-            self.ring.write(ml, mr, n); ml.deallocate(); mr.deallocate()
+            self.ring.write(ml, mr, n)
+            if self.monFlag { self.monitorWrite(ml, mr, n) }
+            ml.deallocate(); mr.deallocate()
             self.rawInL = max(self.rawInL, pl); self.rawInR = max(self.rawInR, pr)
         }
         let bundle = String(self.inUID.dropFirst(4))
@@ -490,6 +558,7 @@ final class Recorder: ObservableObject {
 
     private func startInput() {
         stopInput()
+        defer { applyMonitor() }
         if inUID.hasPrefix("app:") { guard live else { return }; startApp(); return }
         guard live, !inUID.hasPrefix("app:"), Permissions.allowed("Microphone"),
               let dev = inputs.first(where: { $0.uid == inUID }) else { return }
@@ -517,6 +586,7 @@ final class Recorder: ObservableObject {
                     if g != 1 { for i in 0..<n { l[i] *= g; r[i] *= g } }
                     for i in 0..<n { pl = max(pl, abs(l[i])); pr = max(pr, abs(r[i])) }
                     self.ring.write(l.baseAddress!, r.baseAddress!, n)
+                    if self.monFlag { self.monitorWrite(l.baseAddress!, r.baseAddress!, n) }
                 }
             }
             self.rawInL = max(self.rawInL, pl); self.rawInR = max(self.rawInR, pr)
@@ -604,7 +674,7 @@ final class Recorder: ObservableObject {
 
     func play(_ t: Take) {
         guard !recording, t.frames > 1, let dev = outputs.first(where: { $0.uid == outUID }), dev.id != 0 else { return }
-        pause()
+        pause(restart: false)
         if t.cursor >= Double(t.frames - 2) { t.cursor = 0 }
         let n = t.frames
         let l = UnsafeMutablePointer<Float>.allocate(capacity: n), r = UnsafeMutablePointer<Float>.allocate(capacity: n)
@@ -612,10 +682,41 @@ final class Recorder: ObservableObject {
         t.r.withUnsafeBufferPointer { r.update(from: $0.baseAddress!, count: n) }
         pL = l; pR = r; pN = n
         pPos = t.cursor; pStep = t.rate / Devices.rate(dev.id); pDone = false
+        playingTake = t
+        if !startOutputProc() { playingTake = nil; freePlayback(); return }
+        error = nil
+        playingID = t.id; lastID = t.id
+    }
+
+    /// the playhead stays where it stopped; the next click goes on from there. v16: monitoring goes on (the proc is made
+    /// again without the take) unless `restart` is false.
+    func pause(restart: Bool = true) {
+        stopOutputProc()
+        if let t = playingTake { t.cursor = min(pPos, Double(t.frames)) }
+        freePlayback()
+        playingTake = nil; playingID = nil
+        if restart && live && monitorOn && monFlag { startOutputProc() }
+    }
+
+    private func freePlayback() {
+        pL?.deallocate(); pR?.deallocate(); pL = nil; pR = nil; pN = 0
+    }
+
+    private func stopOutputProc() {
+        if let p = outProc { AudioDeviceStop(outDev, p); AudioDeviceDestroyIOProcID(outDev, p) }
+        outProc = nil
+    }
+
+    /// v16: the ONE output IOProc. It plays the take when there is one (pL non-nil) and mixes the monitoring ring in when
+    /// monFlag is set; it runs while either is on. It is always stopped before a take's memory is freed.
+    @discardableResult
+    private func startOutputProc() -> Bool {
+        guard outProc == nil, let dev = outputs.first(where: { $0.uid == outUID }), dev.id != 0 else { return false }
         outDev = dev.id
+        mStep = inRate / Devices.rate(dev.id); mPrimed = false
         var op: AudioDeviceIOProcID?
         var st = AudioDeviceCreateIOProcIDWithBlock(&op, outDev, nil) { [weak self] _, _, _, outData, _ in
-            guard let self = self, let L = self.pL, let R = self.pR else { return }
+            guard let self = self else { return }
             let list = UnsafeMutableAudioBufferListPointer(outData)
             guard list.count > 0, let o0 = list[0].mData?.assumingMemoryBound(to: Float.self) else { return }
             let ch = Int(list[0].mNumberChannels)
@@ -624,19 +725,47 @@ final class Recorder: ObservableObject {
             for b in (o1 == nil ? 1 : 2)..<max(list.count, o1 == nil ? 1 : 2) {
                 if let m = list[b].mData { memset(m, 0, Int(list[b].mDataByteSize)) }
             }
+            let L = self.pL, R = self.pR
             var pos = self.pPos
             let step = self.pStep, N = self.pN
             var pl: Float = 0, pr: Float = 0
             let g = self.outOnDeviceFlag ? 1 : self.outSoft
+            // the monitoring ring: wait until one chunk plus one output buffer has arrived, then read at the rate ratio;
+            // too much in the ring: skip to the target (latency never grows); too little: silence, wait again
+            var mon = false
+            var mp = self.mPos
+            let mstep = self.mStep
+            if self.monFlag {
+                OSMemoryBarrier()
+                let w = Double(self.monW.pointee)
+                let need = Double(n) * mstep + 1
+                let target = Double(self.monChunk) + Double(n) * mstep
+                if !self.mPrimed, w >= target { mp = w - target; self.mPrimed = true }
+                if self.mPrimed {
+                    let avail = w - mp
+                    if avail > 3 * target + need { mp = w - target }
+                    if w - mp < need { self.mPrimed = false } else { mon = true }
+                }
+            } else { self.mPrimed = false }
             for i in 0..<n {
                 var l: Float = 0, r: Float = 0
-                let k = Int(pos)
-                if k + 1 < N {
-                    let f = Float(pos - Double(k))
-                    l = L[k] + (L[k + 1] - L[k]) * f; r = R[k] + (R[k + 1] - R[k]) * f
-                    pos += step
-                    l *= g; r *= g
-                } else { self.pDone = true }
+                if let L = L, let R = R {
+                    let k = Int(pos)
+                    if k + 1 < N {
+                        let f = Float(pos - Double(k))
+                        l = L[k] + (L[k + 1] - L[k]) * f; r = R[k] + (R[k + 1] - R[k]) * f
+                        pos += step
+                    } else { self.pDone = true }
+                }
+                if mon {
+                    let k = Int(mp), f = Float(mp - Double(k))
+                    let i0 = k & Recorder.monMask, i1 = (k + 1) & Recorder.monMask
+                    l += self.monL[i0] + (self.monL[i1] - self.monL[i0]) * f
+                    r += self.monR[i0] + (self.monR[i1] - self.monR[i0]) * f
+                    mp += mstep
+                }
+                l *= g; r *= g
+                l = min(max(l, -1), 1); r = min(max(r, -1), 1)
                 pl = max(pl, abs(l)); pr = max(pr, abs(r))
                 if ch >= 2 {
                     o0[i * ch] = l; o0[i * ch + 1] = r
@@ -647,28 +776,84 @@ final class Recorder: ObservableObject {
                     o0[i] = (l + r) / 2
                 }
             }
-            self.pPos = pos
+            if L != nil { self.pPos = pos }
+            if mon { self.mPos = mp }
             self.rawOutL = max(self.rawOutL, pl); self.rawOutR = max(self.rawOutR, pr)
         }
-        if st != noErr || op == nil { error = "the output would not open (\(st))"; freePlayback(); return }
+        if st != noErr || op == nil { error = "the output would not open (\(st))"; return false }
         outProc = op
         st = AudioDeviceStart(outDev, op)
-        if st != noErr { error = "the output would not start (\(st))"; playingTake = t; pause(); return }
-        error = nil
-        playingTake = t; playingID = t.id; lastID = t.id
+        if st != noErr { error = "the output would not start (\(st))"; stopOutputProc(); return false }
+        return true
     }
 
-    /// the playhead stays where it stopped; the next click goes on from there
-    func pause() {
-        if let p = outProc { AudioDeviceStop(outDev, p); AudioDeviceDestroyIOProcID(outDev, p) }
-        outProc = nil
-        if let t = playingTake { t.cursor = min(pPos, Double(t.frames)) }
-        freePlayback()
-        playingTake = nil; playingID = nil
+    // ---------------------------------------------------------------- v16: input monitoring
+    /// the input's audio thread: frames into the monitoring ring (no lock, no allocation)
+    private func monitorWrite(_ l: UnsafePointer<Float>, _ r: UnsafePointer<Float>, _ n: Int) {
+        var w = monW.pointee
+        for i in 0..<n {
+            let k = Int(w) & Self.monMask
+            monL[k] = l[i]; monR[k] = r[i]
+            w += 1
+        }
+        monChunk = n
+        OSMemoryBarrier()
+        monW.pointee = w
     }
 
-    private func freePlayback() {
-        pL?.deallocate(); pR?.deallocate(); pL = nil; pR = nil; pN = 0
+    func toggleMonitor() {
+        monitorOn.toggle()
+        if live { UserDefaults.standard.set(monitorOn, forKey: "monitorOn") }
+        applyMonitor()
+    }
+
+    func setMonitorBuf(_ f: Int) {
+        guard Self.monitorSizes.contains(f) else { return }
+        monitorBuf = f
+        if live { UserDefaults.standard.set(f, forKey: "monitorBuf") }
+        applyMonitor()
+    }
+
+    func bufferLabel(_ f: Int) -> String { String(format: "%d frames - %.1f ms", f, Double(f) / max(1, inRate) * 1000) }
+
+    /// sets the buffer size on both devices, starts or stops the output proc, writes the estimate line
+    func applyMonitor() {
+        guard live else { return }
+        monitorNote = nil; monitorInfo = nil
+        monFlag = monitorOn
+        if !monitorOn {
+            if playingTake == nil { stopOutputProc() }
+            return
+        }
+        guard let od = outputs.first(where: { $0.uid == outUID }), od.id != 0 else {
+            monitorNote = "Monitoring needs an output device: choose one in the Output row."
+            return
+        }
+        var notes: [String] = []
+        var inFrames = 0, inLat = 0
+        let idev = inputs.first(where: { $0.uid == inUID && $0.id != 0 })
+        if let d = idev {
+            if let a = Devices.setBuffer(d.id, monitorBuf) {
+                inFrames = a
+                if a != monitorBuf { notes.append("the input takes \(a) frames at the nearest") }
+            } else { notes.append("the input would not take a buffer of \(monitorBuf) frames"); inFrames = Devices.bufferFrames(d.id) }
+            inLat = Devices.latencyFrames(d.id, input: true)
+        } else { inFrames = 480 }                               // an app's audio arrives in chunks of about 10 ms
+        var outFrames = 0
+        if let a = Devices.setBuffer(od.id, monitorBuf) {
+            outFrames = a
+            if a != monitorBuf { notes.append("the output takes \(a) frames at the nearest") }
+        } else { notes.append("the output would not take a buffer of \(monitorBuf) frames"); outFrames = Devices.bufferFrames(od.id) }
+        let outLat = Devices.latencyFrames(od.id, input: false)
+        let oRate = Devices.rate(od.id)
+        mStep = inRate / oRate
+        if playingTake == nil { stopOutputProc(); startOutputProc() }
+        let tin = Double(inFrames + inLat) / max(1, inRate)
+        let ring = (Double(inFrames) + Double(outFrames) * mStep) / max(1, inRate)
+        let tout = Double(outFrames + outLat) / max(1, oRate)
+        let ms = (tin + ring + tout) * 1000
+        monitorInfo = String(format: "about %.1f ms through your devices", ms)
+        if !notes.isEmpty { monitorNote = notes.joined(separator: "; ") + "." }
     }
 
     // ---------------------------------------------------------------- saving
@@ -809,7 +994,8 @@ final class Recorder: ObservableObject {
     // ---------------------------------------------------------------- the end
     /// QUIT, OFF, ⌘Q: the devices let go and the takes are forgotten. They were never on the disk.
     func forget() {
-        pause()
+        monFlag = false                                     // v16: monitoring is off when the app ends (the saved choice stays)
+        pause(restart: false)
         stopInput()
         recording = false
         current = nil

@@ -1,6 +1,6 @@
 # TAKEOVER: Sound Recorder (Mantra)
 
-**Version 15** (10.11.2026: "App audio (<app>)" inputs, BlackHole not offered) · Version 14 (10.11.2026, task 99: Chrome through a CoreAudio process tap) · Version 13 (10.11.2026: the Chrome channel) · Version 12 (10.11.2026, task 89: Firefox app capture, Suno panel) · Version 11 (1.11.2026) · **closed by Marko 1.11.2026** (before: closed at v8, 31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
+**Version 16** (24.11.2026: input monitoring, built by GitHub Actions) · Version 15 (10.11.2026: "App audio (<app>)" inputs, BlackHole not offered) · Version 14 (10.11.2026, task 99: Chrome through a CoreAudio process tap) · Version 13 (10.11.2026: the Chrome channel) · Version 12 (10.11.2026, task 89: Firefox app capture, Suno panel) · Version 11 (1.11.2026) · **closed by Marko 1.11.2026** (before: closed at v8, 31.10.2026) · repo markoboskoauroville/MANTRA_SOUND_RECORDER (private) ·
 `/Applications/Sound Recorder (Mantra).app`, bundle id `community.auroville.mantrasoundrecorder`.
 The reasons behind the choices are in [LESSONS.md](LESSONS.md).
 
@@ -29,6 +29,7 @@ Input row, each with its meter and device menu.
   app's own boost, to +32 dB (amber). The auto gain raises the volume to its top first, then the boost; down, the
   boost goes first. The slider is the indicator: it follows the auto gain. Boost saved in defaults as `inBoost`.
   `--slider-test <input>` sets positions and reads the dB back.
+- **Input monitoring (v16, 24.11.2026)**: the Input row's mic tile is a switch (AX button `monitor`, label "Input monitoring"; green when on; UserDefaults `monitorOn`, off by default). On, a row opens under the Input row: "Monitoring buffer" with a menu of 32 / 64 / 128 / 256 / 512 / 1024 frames, each with its milliseconds at the input's rate (`monitorBuf`, default 128), a dim "about N ms through your devices" line (latencies read from CoreAudio), an amber "feedback risk: use headphones" always, and an amber line when a device refuses or clamps the size.
 - **Takes**: every recording of the session is its own waveform, numbered, oldest on top, with `position / length`.
   **A click on a waveform plays / pauses it** (there is no play key); **⌘-click jumps there and plays**. **SAVE** in each waveform's upper right corner opens a save dialog (the last
   folder, at first ~/Music; name "Take N - d.M.yyyy HH.mm.wav") and writes WAV, stereo, 24 bit, at the take's rate;
@@ -52,6 +53,7 @@ Input row, each with its meter and device menu.
   into the take (`takeL`, `takeR`) while recording, and makes the waveform: the loudest sample of every 256 frames.
 - The **output** IOProc runs only while playing. It reads a copy of the take at the output device's own rate (step
   = take rate / output rate, linear interpolation), so the device's rate is never changed.
+- **Monitoring (v16)**: the input IOProc (and the App-audio sink) also writes the gained frames into `monL/monR`, a second ring of 32768 frames whose write counter is a 64-bit word published with `OSMemoryBarrier()`: one writer, one reader, no lock, no allocation. The ONE output IOProc (`startOutputProc`) now runs while a take plays OR monitoring is on; it mixes the take and the ring (linear resampling by input rate / output rate), applies the output volume (device's own, else `outSoft`), clamps to ±1. It waits until one input chunk + one output buffer have arrived, skips to that target when the ring holds more than three times that (latency never grows), and goes silent and waits again on an underrun. `applyMonitor()` sets `kAudioDevicePropertyBufferFrameSize` on both devices (clamped to their range) and recomputes the estimate; it runs on toggle, buffer, input or output change. pause() stops the proc before a take is freed and restarts it for monitoring. forget() (OFF, quit) switches monitoring off; the saved choice stays. Monitoring is never recorded (the take reads the main ring only).
 - **Volume**: `VolumeWatch` moves the device's own volume (kAudioDevicePropertyVolumeScalar, element 0, or each
   channel element as on the ADAM: 1 and 2) and listens to it, so the volume keys and System Settings move the slider.
   A device without a settable volume gets the app's own gain (`inSoft` / `outSoft`, UserDefaults `inGain` / `outGain`),
@@ -180,3 +182,8 @@ Marko: "please, in the recorder, don't mention black hole. Just write in the inp
 app is that". The Input menu: the real input devices, then **App audio (Google Chrome)** and **App audio (Firefox)**;
 the BlackHole device is not offered as an input (the tests `--gain-test` still find it by name). The Suno panel's line
 says "the app's own sound (App audio)". `--inputs` prints the menu's entries (checked 10.11.2026: no BlackHole).
+
+
+## v16 (24.11.2026): input monitoring
+
+Marko: "Listen to me on the input when I click on the icon of the microphone ... a new drop-down menu opens below this line with buffer size and milliseconds so I can choose how much delay I want to hear. If you can do some magic to have zero delay, let me know." Described in The window and The model above. Zero delay is not possible through the Mac: the input buffer, the output buffer, the devices' own latency and safety offsets cannot be skipped (an interface's own direct monitoring knob is the zero-latency way). Not proven by ear yet (no sound was played on his speakers while building); the first test is Marko's, with headphones. Compiled only by GitHub Actions (.github/workflows/build.yml, release vN Latest); build.sh takes SIGN and NO_INSTALL for the runner.
