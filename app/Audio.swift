@@ -453,6 +453,14 @@ final class Recorder: ObservableObject {
                 nc.addObserver(forName: n, object: nil, queue: .main) { [weak self] _ in self?.refreshDevices() }
             }
         }
+        if live {   // v19: re-read the running apps every 2 s, so a closed app leaves the list; published only when it changed
+            let t = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                let now = RunningApps.devices(keeping: self.inUID).map { $0.uid + $0.name }
+                if now != self.inputs.filter({ $0.uid.hasPrefix("app:") }).map({ $0.uid + $0.name }) { self.refreshDevices() }
+            }
+            RunLoop.main.add(t, forMode: .common)
+        }
         timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(timer!, forMode: .common)
         guard live else { return }
@@ -475,9 +483,10 @@ final class Recorder: ObservableObject {
         // v15 (Marko, 10.11.2026: "don't mention black hole. Just write in the inputs: "App audio" in the parentheses. Which
         // app is that"): the app sources read "App audio (<app>)", and the BlackHole device is not offered as an input
         inputs = all.filter { $0.inputs > 0 && !$0.name.localizedCaseInsensitiveContains("blackhole") }
-            + [Device(id: 0, name: "App audio (Google Chrome)", uid: Recorder.chromeUID, inputs: 2, outputs: 0),
-               Device(id: 0, name: "App audio (Firefox)", uid: Recorder.fireUID, inputs: 2, outputs: 0)]
-            + RunningApps.devices(keeping: UserDefaults.standard.string(forKey: "input"))
+            + RunningApps.devices(keeping: inUID)
+        let closed = inUID.hasPrefix("app:") && inputs.first(where: { $0.uid == inUID })?.name.hasSuffix("closed)") == true
+        if closed && error == nil { error = "The chosen app is closed: pick another app or an input device." }
+        else if !closed && error == "The chosen app is closed: pick another app or an input device." { error = nil }
         outputs = [Device(id: 0, name: "None (no output)", uid: "none", inputs: 0, outputs: 2)] + all.filter { $0.outputs > 0 }
     }
 
@@ -1226,21 +1235,39 @@ final class Recorder: ObservableObject {
 }
 
 // MANTRA_MANIFEST swift-apps.md, PERMISSIONS: the one this app uses is the microphone (every input device, BlackHole too).
-/// v18: every running app with a window and a Dock icon, as an "App audio (<app>)" input (uid app:<bundle id>)
+/// v19: the app list is rebuilt from the live system every time (never cached or accumulated), the way OBS's mac-capture
+/// lists applications (its SCShareableContent applications, the ones that really have windows): every running app that
+/// has a window, as an "App audio (<app>)" input (uid app:<bundle id>). Chrome and Firefox are listed only while running.
+/// Only the currently selected input may stay as a "(closed)" entry until another is picked.
 enum RunningApps {
+    /// process ids that own at least one real window (layer 0, not tiny), on any Space, minimised too
+    static func windowOwners() -> Set<pid_t> {
+        var s: Set<pid_t> = []
+        guard let list = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else { return s }
+        for w in list {
+            guard (w[kCGWindowLayer as String] as? Int) == 0, let pid = w[kCGWindowOwnerPID as String] as? Int else { continue }
+            if let b = w[kCGWindowBounds as String] as? [String: Any], let h = b["Height"] as? Double, let wd = b["Width"] as? Double, h < 40 || wd < 40 { continue }
+            s.insert(pid_t(pid))
+        }
+        return s
+    }
+
     static func devices(keeping saved: String?) -> [Device] {
-        var seen: Set<String> = ["com.google.Chrome", "org.mozilla.firefox"]
+        var seen: Set<String> = []
         if let me = Bundle.main.bundleIdentifier { seen.insert(me) }
+        let owners = windowOwners()
         var out: [Device] = []
-        for a in NSWorkspace.shared.runningApplications where a.activationPolicy == .regular {
+        for a in NSWorkspace.shared.runningApplications where !a.isTerminated && a.activationPolicy != .prohibited && owners.contains(a.processIdentifier) {
             guard let b = a.bundleIdentifier, !seen.contains(b) else { continue }
             seen.insert(b)
             out.append(Device(id: 0, name: "App audio (\(a.localizedName ?? b))", uid: "app:" + b, inputs: 2, outputs: 0))
         }
         out.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        // a saved choice that is not running now stays in the menu (so the picker still shows it)
+        // the selected app that is not running (or has no window) any more: the only closed entry, until he picks another
         if let s = saved, s.hasPrefix("app:"), !seen.contains(String(s.dropFirst(4))) {
-            out.insert(Device(id: 0, name: "App audio (\(s.dropFirst(4)), not running)", uid: s, inputs: 2, outputs: 0), at: 0)
+            let b = String(s.dropFirst(4))
+            let n = NSWorkspace.shared.urlForApplication(withBundleIdentifier: b).map { FileManager.default.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "") } ?? b
+            out.insert(Device(id: 0, name: "App audio (\(n), closed)", uid: s, inputs: 2, outputs: 0), at: 0)
         }
         return out
     }

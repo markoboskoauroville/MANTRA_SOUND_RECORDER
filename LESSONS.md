@@ -125,3 +125,7 @@ Appended, never rewritten. Newest last.
 - **Mono is made at drain time**, not at save: the stored take is the mixdown on both sides, so waveform, playback and the WAV agree.
 - **Screen Recording may need a relaunch** even after it is granted; the app tries to reopen the source, then relaunches itself when no takes would be lost.
 - **`open` is a Swift keyword-ish word**: the panel's state is `isOpen`.
+
+## The app list follows what is running (24.11.2026, v19)
+
+Chrome stayed in the list after closing because v18 added it (and Firefox) as permanent entries and only appended running apps. The list is now rebuilt from live state each time (running apps that own a window), the approach of OBS Studio's mac-capture (apps from the system's shareable content, with windows), written independently (OBS is GPLv2; no code copied).
