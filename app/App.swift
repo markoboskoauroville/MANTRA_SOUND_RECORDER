@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 18
+let VERSION = 19
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -185,11 +185,11 @@ struct DevicesPanel: View {
             Text("Level").frame(maxWidth: .infinity)
             Text("Device").frame(width: 230)
         }.font(.system(size: 11)).foregroundStyle(Ink.dim).padding(.leading, 160))) {
-            DeviceRow(icon: "speaker.wave.2.fill", name: "Output", meter: r.outMeter,
+            DeviceRow(icon: "speaker.wave.2.fill", name: "Output", meter: r.outMeter, mono: r.recMono,
                       volume: r.sliderPos(input: false), gain: r.gainDB(input: false), onDevice: r.outOnDevice, setVolume: { r.setSlider(input: false, $0) },
                       devices: r.outputs, uid: r.outUID, enabled: true, fill: Ink.rowGrey,
                       extra: AnyView(Color.clear.frame(width: 30, height: 30))) { r.chooseOutput($0) }
-            DeviceRow(icon: "mic.fill", name: "Input", meter: r.inMeter,
+            DeviceRow(icon: "mic.fill", name: "Input", meter: r.inMeter, mono: r.recMono,
                       volume: r.sliderPos(input: true), boost: r.inBoost, gain: r.gainDB(input: true), zeroAt: r.inZeroAt, onDevice: r.inOnDevice, setVolume: { r.setSlider(input: true, $0) },
                       devices: r.inputs, uid: r.inUID, enabled: !r.recording, fill: Ink.rowGreen,
                       extra: AnyView(AutoGainKey(r: r)), iconOn: r.monitorOn,
@@ -299,6 +299,7 @@ struct FormatRow: View {
 struct DeviceRow: View {
     let icon: String, name: String
     let meter: Meter
+    var mono = false                                    // v19: Mono selected: one meter bar, not two
     let volume: Float
     var boost: Float = 1
     var gain: Float? = nil
@@ -332,7 +333,7 @@ struct DeviceRow: View {
             VStack(spacing: 6) {
                 VolumeSlider(label: name + " volume", value: volume, zeroAt: zeroAt, set: setVolume).frame(height: 16)
                     .help(onDevice ? "The device's own volume (the volume keys move it too)" : "This device has no volume of its own: the app's gain")
-                MeterView(m: meter).frame(height: 11)
+                MeterView(m: meter, mono: mono).frame(height: 11)
             }
             .frame(minWidth: 80)
             VStack(alignment: .trailing, spacing: 5) {
@@ -353,7 +354,7 @@ struct DeviceRow: View {
     }
 
     var readout: String {
-        let p = max(meter.holdL, meter.holdR)
+        let p = mono ? meter.holdM : max(meter.holdL, meter.holdR)
         return p <= -60 ? "−∞ dB" : String(format: "%.1f dB", p)
     }
 }
@@ -393,15 +394,17 @@ struct VolumeSlider: View {
     }
 }
 
-/// Two bars, left over right: green to -12 dBFS, amber to -3, red above; the white tick is the held peak.
+/// Two bars, left over right (v19: one bar, the L+R mix, while Mono is selected): green to -12 dBFS, amber to -3, red above; the white tick is the held peak.
 struct MeterView: View {
     let m: Meter
+    var mono = false
     static func x(_ db: Float) -> CGFloat { CGFloat(min(max((db + 60) / 60, 0), 1)) }
 
     var body: some View {
         Canvas { c, size in
-            let h = (size.height - 3) / 2
-            for (i, (lvl, hold)) in [(m.l, m.holdL), (m.r, m.holdR)].enumerated() {
+            let bars: [(Float, Float)] = mono ? [(m.m, m.holdM)] : [(m.l, m.holdL), (m.r, m.holdR)]
+            let h = mono ? size.height : (size.height - 3) / 2
+            for (i, (lvl, hold)) in bars.enumerated() {
                 let y = CGFloat(i) * (h + 3)
                 let track = CGRect(x: 0, y: y, width: size.width, height: h)
                 c.fill(Path(roundedRect: track, cornerRadius: 2), with: .color(Ink.well))

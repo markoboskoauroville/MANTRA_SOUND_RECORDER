@@ -256,6 +256,8 @@ struct Meter {
     var l: Float = -90, r: Float = -90
     var holdL: Float = -90, holdR: Float = -90
     var holdAgeL = 0.0, holdAgeR = 0.0
+    /// v19: the mono mix ((L+R)/2) for the single bar while Mono is selected
+    var m: Float = -90, holdM: Float = -90, holdAgeM = 0.0
 
     static func db(_ x: Float) -> Float { x > 0.00003 ? 20 * log10(x) : -90 }
 
@@ -265,6 +267,8 @@ struct Meter {
         holdAgeL += dt; holdAgeR += dt
         if l >= holdL || holdAgeL > 1.5 { holdL = l; holdAgeL = 0 }
         if r >= holdR || holdAgeR > 1.5 { holdR = r; holdAgeR = 0 }
+        m = max(Self.db((pl + pr) / 2), m - fall); holdAgeM += dt
+        if m >= holdM || holdAgeM > 1.5 { holdM = m; holdAgeM = 0 }
     }
 }
 
