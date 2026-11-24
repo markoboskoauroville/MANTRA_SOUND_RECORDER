@@ -118,3 +118,10 @@ Appended, never rewritten. Newest last.
 
 - Changing a device's nominal rate is asynchronous: set it, then poll the read-back (up to 0.5 s) before opening the IOProc; the take's rate is the rate read back, never the one asked for.
 - A self-updater must never quit an app that holds unsaved memory: install at once only with no takes, otherwise at the quit.
+
+## 24.11.2026, v18
+
+- **A permission prompt per version = an ad hoc signature.** CI signs `-` (cdhash requirement); a release zip unpacked by hand stays ad hoc. Only the updater's `codesign -s "Mantra Apps"` (identifier + certificate leaf) is stable. Never unpack a release into /Applications without re-signing.
+- **Mono is made at drain time**, not at save: the stored take is the mixdown on both sides, so waveform, playback and the WAV agree.
+- **Screen Recording may need a relaunch** even after it is granted; the app tries to reopen the source, then relaunches itself when no takes would be lost.
+- **`open` is a Swift keyword-ish word**: the panel's state is `isOpen`.

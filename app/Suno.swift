@@ -67,7 +67,9 @@ final class SunoWatch: ObservableObject {
     @Published var state = SunoState()
     private var timer: Timer?
     private var busy = false
+    func stop() { timer?.invalidate(); timer = nil }
     func start() {
+        guard timer == nil else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             guard let self = self, !self.busy else { return }
             self.busy = true

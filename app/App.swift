@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-let VERSION = 17
+let VERSION = 18
 let RELEASES = URL(string: "https://github.com/markoboskoauroville/MANTRA_SOUND_RECORDER/releases/latest")!
 
 enum Ink {
@@ -40,7 +40,17 @@ struct Root: View {
     @ObservedObject var r: Recorder
     @State private var missing = Permissions.missing
     @State private var contentHeight: CGFloat = 0
+    @State private var tick = 0
     let margin: CGFloat = 14
+
+    func checkPermissions() {
+        let m = Permissions.missing
+        if m != missing {
+            let screen = missing.contains("Screen Recording") && Permissions.allowed("Screen Recording")
+            missing = m; r.permissionsChanged()
+            if screen { r.screenGranted() }
+        }
+    }
 
     var body: some View {
         GeometryReader { g in
@@ -49,7 +59,7 @@ struct Root: View {
                 VStack(alignment: .leading, spacing: 12) {
                     TopRow(missing: missing)
                     DevicesPanel(r: r)
-                    SunoPanel(r: r)
+                    AppRecorderPanel(r: r)
                     TakesPanel(r: r)
                     Footer()
                 }
@@ -69,10 +79,14 @@ struct Root: View {
         .background(Ink.ground)
         .frame(minWidth: 600, idealWidth: 720, maxWidth: .infinity, minHeight: 520, idealHeight: 540, maxHeight: .infinity)
         .environment(\.colorScheme, .dark)
-        .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
-            let m = Permissions.missing
-            if m != missing { missing = m; r.permissionsChanged() }
+        // v18: a permission granted while the app runs is used at once: checked every second, and when the app is brought to the front
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+            checkPermissions()
+            tick += 1
+            if tick % 3 == 0 { r.retryApp() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in checkPermissions() }
+        .onAppear { Permissions.askAtStart() }
     }
 }
 
@@ -186,6 +200,10 @@ struct DevicesPanel: View {
                 Text(n).font(.system(size: 11, design: .monospaced)).foregroundStyle(r.gain == .failed ? Ink.amber : Ink.text)
                     .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 14).padding(.top, 6)
             }
+            if let n = r.restartNote {
+                Text(n).font(.system(size: 11)).foregroundStyle(Ink.amber)
+                    .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 14).padding(.vertical, 6)
+            }
             if let e = r.error {
                 Text(e).font(.system(size: 11)).foregroundStyle(Ink.amber)
                     .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 14).padding(.vertical, 6)
@@ -256,6 +274,12 @@ struct FormatRow: View {
                 }
                 .labelsHidden().pickerStyle(.menu).disabled(r.recording || r.rateLocked).frame(width: 130)
                 .accessibilityLabel("Sample rate").accessibilityIdentifier("rate")
+                Picker("", selection: Binding(get: { r.recMono }, set: { r.setMono($0) })) {
+                    Text("Stereo").tag(false)
+                    Text("Mono").tag(true)
+                }
+                .labelsHidden().pickerStyle(.menu).disabled(r.recording).frame(width: 90)
+                .accessibilityLabel("Channels").accessibilityIdentifier("channels")
             }
             Text(r.sizeText).font(.system(size: 11, design: .monospaced)).foregroundStyle(Ink.dim).padding(.leading, 40)
             if r.rateLocked {
@@ -822,17 +846,77 @@ enum Main {
     }
 }
 
-// ---------------------------------------------------------------- SUNO (v12)
-struct SunoPanel: View {
+// ---------------------------------------------------------------- APP RECORDER (v18; was the Suno panel since v12)
+/// v18 (Marko, 24.11.2026: "make this window ... collapsible and call it this app recorder, not Suno, so any app can be
+/// basically recorded by choosing its window"): choose any running app, its own sound becomes the Input. Suno is a small
+/// sub-section. The panel and the Suno part open and close; both states are kept (UserDefaults).
+struct AppRecorderPanel: View {
     @ObservedObject var r: Recorder
+    @AppStorage("apprecOpen") private var isOpen = true
+    @AppStorage("apprecSuno") private var sunoOpen = false
     @StateObject private var watch = SunoWatch()
     @State private var session: SunoSession?
     @State private var note = ""
     @State private var armed = false
     @State private var failed = false
+
+    var apps: [Device] { r.inputs.filter { $0.uid.hasPrefix("app:") } }
+    var chosen: Device? { apps.first { $0.uid == r.inUID } }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: isOpen ? "chevron.down" : "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Ink.dim).frame(width: 12)
+                Text("App recorder").font(.system(size: 14, weight: .bold)).foregroundStyle(Ink.text)
+                Spacer()
+                Text(chosen.map { $0.name.replacingOccurrences(of: "App audio (", with: "").replacingOccurrences(of: ")", with: "") } ?? "no app chosen")
+                    .font(.system(size: 11)).foregroundStyle(Ink.dim).lineLimit(1)
+            }
+            .padding(.horizontal, 14).frame(height: 36)
+            .contentShape(Rectangle())
+            .onTapGesture { withAnimation(.easeOut(duration: 0.15)) { isOpen.toggle() } }
+            .axButton("App recorder", id: "apprec", value: isOpen ? "expanded" : "collapsed") { withAnimation(.easeOut(duration: 0.15)) { isOpen.toggle() } }
+            if isOpen {
+                HStack(spacing: 10) {
+                    Text("App").font(.system(size: 13)).foregroundStyle(Ink.text).frame(width: 62, alignment: .leading)
+                    Picker("", selection: Binding(get: { chosen?.uid ?? "" }, set: { if !$0.isEmpty { r.chooseInput($0) } })) {
+                        if chosen == nil { Text("Choose a running app").tag("") }
+                        ForEach(apps) { d in Text(d.name).tag(d.uid) }
+                    }
+                    .labelsHidden().pickerStyle(.menu).disabled(r.recording)
+                    .frame(maxWidth: 320)
+                    .accessibilityLabel("App audio").accessibilityIdentifier("apprec-menu")
+                    Spacer()
+                }
+                .padding(.horizontal, 14).padding(.vertical, 6)
+                Text("Pick any running app: its own sound becomes the Input (also in the Input menu above). Then press record (R). The Mac's output and input are never touched.")
+                    .font(.system(size: 11)).foregroundStyle(Ink.dim).fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14).padding(.bottom, 8)
+                sunoSection
+            }
+        }
+        .background(RoundedRectangle(cornerRadius: 12).fill(Ink.panel))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Ink.line, lineWidth: 1))
+        .onAppear { if isOpen && sunoOpen { watch.start() } }
+        .onChange(of: isOpen) { if isOpen && sunoOpen { watch.start() } else { watch.stop() } }
+        .onChange(of: sunoOpen) { if isOpen && sunoOpen { watch.start() } else { watch.stop() } }
+    }
+
+    @ViewBuilder var sunoSection: some View {
         let s = watch.state
-        Panel(title: "Suno", right: AnyView(Text(s.onSong ? s.title : "no song in Firefox").font(.system(size: 11)).foregroundStyle(Ink.dim).lineLimit(1))) {
+        Divider().overlay(Ink.line)
+        HStack(spacing: 8) {
+            Image(systemName: sunoOpen ? "chevron.down" : "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Ink.dim).frame(width: 12)
+            Text("Suno").font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.dim)
+            Spacer()
+            if sunoOpen { Text(s.onSong ? s.title : "no song in Firefox").font(.system(size: 11)).foregroundStyle(Ink.dim).lineLimit(1) }
+        }
+        .padding(.horizontal, 14).frame(height: 28)
+        .contentShape(Rectangle())
+        .onTapGesture { withAnimation(.easeOut(duration: 0.15)) { sunoOpen.toggle() } }
+        .axButton("Suno helper", id: "apprec-suno", value: sunoOpen ? "expanded" : "collapsed") { withAnimation(.easeOut(duration: 0.15)) { sunoOpen.toggle() } }
+        if sunoOpen {
             HStack(spacing: 18) {
                 clock("ELAPSED", s.ok ? Clock.mmss(s.t) : "-:--")
                 clock("LEFT", s.ok ? Clock.mmss(s.remaining) : "-:--")
@@ -856,10 +940,9 @@ struct SunoPanel: View {
                 .disabled(r.recording || armed || !s.onSong).accessibilityIdentifier("sunorec")
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
-            Text(note.isEmpty ? "Takes the app's own sound (App audio), the system audio is never touched. Press the button, then press play in Suno: it records by itself and stops at the song's end, so the next song never starts." : note)
+            Text(note.isEmpty ? "Press the button, then press play in Suno: it records Firefox's sound by itself and stops at the song's end, so the next song never starts." : note)
                 .font(.system(size: 11)).foregroundStyle(Ink.dim).fixedSize(horizontal: false, vertical: true).padding(.horizontal, 14).padding(.bottom, 8)
         }
-        .onAppear { watch.start() }
     }
     func clock(_ label: String, _ v: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {

@@ -23,8 +23,8 @@ cat > "$APP/Contents/Info.plist" <<PL
 <key>CFBundleVersion</key><string>$V</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
-<key>NSScreenCaptureUsageDescription</key><string>Sound Recorder (Mantra) takes the sound of one app, Chrome or Firefox (a Suno song), without changing the Mac audio.</string>
-<key>NSAudioCaptureUsageDescription</key><string>Sound Recorder (Mantra) takes the sound of one app (Chrome, a Suno song) without changing the Mac audio.</string>
+<key>NSScreenCaptureUsageDescription</key><string>Sound Recorder (Mantra) takes the sound of any app you choose (Chrome, Firefox, a Suno song...) without changing the Mac audio.</string>
+<key>NSAudioCaptureUsageDescription</key><string>Sound Recorder (Mantra) takes the sound of any app you choose without changing the Mac audio.</string>
 <key>NSMicrophoneUsageDescription</key><string>Sound Recorder (Mantra) records the input you choose. The recording stays in memory and is gone when the app quits.</string>
 </dict></plist>
 PL

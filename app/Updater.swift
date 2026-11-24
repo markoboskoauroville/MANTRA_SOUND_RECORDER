@@ -1,4 +1,4 @@
-// Updater.swift (v17): the app replaces itself from its own GitHub releases. Based on MANTRA_MANIFEST kits/mac-updater, but
+// Updater.swift (v17, v18: the install log ~/Library/Logs/MantraSoundRecorder-update.log shows the designated requirement): the app replaces itself from its own GitHub releases. Based on MANTRA_MANIFEST kits/mac-updater, but
 // automatic (Marko, 24.11.2026): no question; and never while takes are unsaved in memory.
 //
 // At start (in the background): the Latest release of the public repo through the unauthenticated GitHub API (curl).
@@ -103,7 +103,10 @@ final class Updater: ObservableObject {
         T="$1"; N="$2"; P="$3"; S="$4"; O="$5"; C="$6"
         while kill -0 "$P" 2>/dev/null; do sleep 0.2; done
         xattr -dr com.apple.quarantine "$N" 2>/dev/null
-        codesign --force -s "$S" "$N" || { [ "$O" = "1" ] && open "$T"; exit 1; }
+        L="$HOME/Library/Logs/MantraSoundRecorder-update.log"; mkdir -p "$HOME/Library/Logs"
+        echo "$(date) installing over $T" >> "$L"
+        codesign --force -s "$S" "$N" >> "$L" 2>&1 || { echo "codesign with $S FAILED: update not installed" >> "$L"; [ "$O" = "1" ] && open "$T"; exit 1; }
+        codesign -dr - "$N" >> "$L" 2>&1
         rm -rf "$T.old"; mv "$T" "$T.old" || { [ "$O" = "1" ] && open "$T"; exit 1; }
         if ditto "$N" "$T"; then rm -rf "$T.old"; else rm -rf "$T"; mv "$T.old" "$T"; fi
         rm -rf "$C"

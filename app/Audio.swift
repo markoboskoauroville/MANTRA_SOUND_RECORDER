@@ -275,6 +275,8 @@ final class Take: Identifiable {
     let rate: Double
     /// v17: the bit depth SAVE writes (16, 24, or 32 = float), fixed when the take starts
     let bits: Int
+    /// v18: a mono take holds the L+R average on both sides (plays on both outputs); SAVE writes one channel
+    var mono = false
     var l: [Float] = [], r: [Float] = []
     var peaks: [Float] = []
     var cursor: Double = 0
@@ -402,6 +404,7 @@ final class Recorder: ObservableObject {
         Preset(id: "max", name: "Max: 32 bit float / 192 kHz (or the device's top)", bits: 32, rate: 192000),
     ]
     @Published private(set) var recBits = 24
+    @Published private(set) var recMono = false
     @Published private(set) var recRate: Double = 0
     @Published private(set) var recQuality = "custom"
     @Published private(set) var rateNote: String?
@@ -428,6 +431,7 @@ final class Recorder: ObservableObject {
         if d.object(forKey: "outGain") != nil { outSoft = d.float(forKey: "outGain") }
         if d.object(forKey: "inBoost") != nil { inBoost = min(max(d.float(forKey: "inBoost"), 1), Self.maxBoost) }
         if live {
+            recMono = d.string(forKey: "recChannels") == "mono"
             if d.object(forKey: "recBits") != nil, Self.bitOptions.contains(d.integer(forKey: "recBits")) { recBits = d.integer(forKey: "recBits") }
             if d.object(forKey: "recRate") != nil { let r = d.double(forKey: "recRate"); recRate = Devices.standardRates.contains(r) ? r : 0 }
             if let q = d.string(forKey: "recQuality"), q == "custom" || Self.presets.contains(where: { $0.id == q }) { recQuality = q }
@@ -438,6 +442,13 @@ final class Recorder: ObservableObject {
             if d.object(forKey: "monitorBuf") != nil, Self.monitorSizes.contains(d.integer(forKey: "monitorBuf")) { monitorBuf = d.integer(forKey: "monitorBuf") }
         }
         watchVolumes()
+        if live {
+            // v18: the app list follows the apps as they start and quit
+            let nc = NSWorkspace.shared.notificationCenter
+            for n in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+                nc.addObserver(forName: n, object: nil, queue: .main) { [weak self] _ in self?.refreshDevices() }
+            }
+        }
         timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(timer!, forMode: .common)
         guard live else { return }
@@ -455,13 +466,14 @@ final class Recorder: ObservableObject {
         return list.first(where: { $0.id == def })?.uid ?? list.first?.uid ?? ""
     }
 
-    private func refreshDevices() {
+    func refreshDevices() {
         let all = Devices.all()
         // v15 (Marko, 10.11.2026: "don't mention black hole. Just write in the inputs: "App audio" in the parentheses. Which
         // app is that"): the app sources read "App audio (<app>)", and the BlackHole device is not offered as an input
         inputs = all.filter { $0.inputs > 0 && !$0.name.localizedCaseInsensitiveContains("blackhole") }
             + [Device(id: 0, name: "App audio (Google Chrome)", uid: Recorder.chromeUID, inputs: 2, outputs: 0),
                Device(id: 0, name: "App audio (Firefox)", uid: Recorder.fireUID, inputs: 2, outputs: 0)]
+            + RunningApps.devices(keeping: UserDefaults.standard.string(forKey: "input"))
         outputs = [Device(id: 0, name: "None (no output)", uid: "none", inputs: 0, outputs: 2)] + all.filter { $0.outputs > 0 }
     }
 
@@ -567,7 +579,29 @@ final class Recorder: ObservableObject {
     var outputName: String { outputs.first { $0.uid == outUID }?.name ?? "no output" }
 
     /// the window asks every 2 s; the microphone allowed while the app runs starts the input at once
-    func permissionsChanged() { if live && inProc == nil { startInput() } }
+    func permissionsChanged() { if live && inProc == nil && !(inUID.hasPrefix("app:") && tap != nil) { startInput() } }
+
+    /// v18: an app input that failed (permission, app not playing yet) is tried again every 3 s while idle
+    func retryApp() { if live && inUID.hasPrefix("app:") && appError != nil && tap == nil && !recording { startInput() } }
+
+    /// v18: Screen Recording granted while the app runs: the app source is opened again at once; when macOS still refuses
+    /// (it wants a restart for this one) the app relaunches itself, only with no takes and no recording; else an amber line
+    @Published var restartNote: String?
+    func screenGranted() {
+        guard live, inUID.hasPrefix("app:") else { return }
+        startInput()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self = self, self.inUID.hasPrefix("app:"), !self.appReady else { return }
+            if self.takes.isEmpty && !self.recording && self.current == nil {
+                let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh")
+                p.arguments = ["-c", "sleep 1; /usr/bin/open -n \"$0\"", Bundle.main.bundlePath]
+                try? p.run()
+                NSApp.terminate(nil)
+            } else {
+                self.restartNote = "Screen Recording was allowed: quit and open the app again to use it (the takes in memory would be lost; SAVE them first)."
+            }
+        }
+    }
 
     // ---------------------------------------------------------------- the input
     private var tap: AppSource?
@@ -591,13 +625,13 @@ final class Recorder: ObservableObject {
         let bundle = String(self.inUID.dropFirst(4))
         // v14: Chrome plays everything from its AudioService helper, which ScreenCaptureKit does not give to Chrome:
         // a CoreAudio process tap on all of Chrome's processes. Other apps keep ScreenCaptureKit (as OBS).
-        let t: AppSource = ProcTap.wanted(bundle) ? ProcTap(sink: sinkFn) : AppTap(sink: sinkFn)
+        let t: AppSource = ProcTap.preferred(bundle) ? ProcTap(sink: sinkFn) : AppTap(sink: sinkFn)
         tap = t
         inRate = 48000
         availRates = []; rateNote = nil
         Task { @MainActor in
             do { try await t.start(bundle: bundle); self.inRate = t.rate; self.appError = nil; self.error = nil }
-            catch { self.appError = "\(self.inUID.contains("Chrome") ? "Chrome" : "Firefox") audio would not start: \(error.localizedDescription). \(t is ProcTap ? "System Audio Recording" : "Screen Recording") must be allowed for this app."
+            catch { self.appError = "\(self.inputName.replacingOccurrences(of: "App audio (", with: "").replacingOccurrences(of: ")", with: "")) audio would not start: \(error.localizedDescription). \(t is ProcTap ? "System Audio Recording" : "Screen Recording") must be allowed for this app."
                     self.error = self.appError; self.tap = nil }
         }
     }
@@ -670,6 +704,7 @@ final class Recorder: ObservableObject {
         stopAutoGain()
         if let d = inputs.first(where: { $0.uid == inUID && $0.id != 0 }), !inUID.hasPrefix("app:") { inRate = Devices.rate(d.id) }   // v17: the rate the device really runs at
         let t = Take(id: nextID, rate: inRate, bits: recBits)
+        t.mono = recMono
         t.l.reserveCapacity(Int(inRate) * 60); t.r.reserveCapacity(Int(inRate) * 60)
         current = t
         blockMax = 0; blockN = 0
@@ -697,6 +732,7 @@ final class Recorder: ObservableObject {
                 dR.withUnsafeMutableBufferPointer { r in ring.read(&readPos, l.baseAddress!, r.baseAddress!, l.count) }
             }
             if n == 0 { break }
+            if t.mono { for i in 0..<n { let m = (dL[i] + dR[i]) * 0.5; dL[i] = m; dR[i] = m } }
             t.l.append(contentsOf: dL[0..<n]); t.r.append(contentsOf: dR[0..<n])
             for i in 0..<n {
                 blockMax = max(blockMax, abs(dL[i]), abs(dR[i])); blockN += 1
@@ -913,8 +949,8 @@ final class Recorder: ObservableObject {
 
     /// "about 17 MB per minute, stereo"
     var sizeText: String {
-        let mb = effectiveRate * 2 * Double(recBits / 8) * 60 / 1_000_000
-        return String(format: "about %.0f MB per minute, stereo", mb)
+        let mb = effectiveRate * (recMono ? 1 : 2) * Double(recBits / 8) * 60 / 1_000_000
+        return String(format: "about %.0f MB per minute, %@", mb, recMono ? "mono" : "stereo")
     }
 
     func rateLabel(_ r: Double) -> String { String(format: "%g kHz", r / 1000) }
@@ -923,7 +959,7 @@ final class Recorder: ObservableObject {
     private func saveFormat() {
         guard live else { return }
         let d = UserDefaults.standard
-        d.set(recBits, forKey: "recBits"); d.set(recRate, forKey: "recRate"); d.set(recQuality, forKey: "recQuality")
+        d.set(recBits, forKey: "recBits"); d.set(recRate, forKey: "recRate"); d.set(recQuality, forKey: "recQuality"); d.set(recMono ? "mono" : "stereo", forKey: "recChannels")
     }
 
     /// the quality that bits and rate add up to: a preset when they match one, else custom
@@ -933,6 +969,11 @@ final class Recorder: ObservableObject {
             if p.bits == recBits && recRate == rate { return p.id }
         }
         return "custom"
+    }
+
+    func setMono(_ m: Bool) {
+        guard !recording else { return }
+        recMono = m; saveFormat()
     }
 
     func setBits(_ b: Int) {
@@ -1014,7 +1055,7 @@ final class Recorder: ObservableObject {
 
     static func writeWAV(_ t: Take, to url: URL) throws {
         let bits = Self.bitOptions.contains(t.bits) ? t.bits : 24
-        let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: t.rate, AVNumberOfChannelsKey: 2,
+        let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: t.rate, AVNumberOfChannelsKey: t.mono ? 1 : 2,
                                        AVLinearPCMBitDepthKey: bits, AVLinearPCMIsFloatKey: bits == 32, AVLinearPCMIsBigEndianKey: false]
         let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
         let chunk = 65536
@@ -1025,10 +1066,10 @@ final class Recorder: ObservableObject {
         while at < t.frames {
             let n = min(chunk, t.frames - at)
             t.l.withUnsafeBufferPointer { buf.floatChannelData![0].update(from: $0.baseAddress! + at, count: n) }
-            t.r.withUnsafeBufferPointer { buf.floatChannelData![1].update(from: $0.baseAddress! + at, count: n) }
+            if !t.mono { t.r.withUnsafeBufferPointer { buf.floatChannelData![1].update(from: $0.baseAddress! + at, count: n) } }
             if bits == 16 {                                  // v17: TPDF dither, +-1 LSB, before the cut to 16 bit
                 let lsb: Float = 1.0 / 32768.0
-                for c in 0..<2 {
+                for c in 0..<(t.mono ? 1 : 2) {
                     let p = buf.floatChannelData![c]
                     for i in 0..<n { p[i] = min(max(p[i] + (rnd() - rnd()) * lsb, -1), 1) }
                 }
@@ -1181,10 +1222,38 @@ final class Recorder: ObservableObject {
 }
 
 // MANTRA_MANIFEST swift-apps.md, PERMISSIONS: the one this app uses is the microphone (every input device, BlackHole too).
+/// v18: every running app with a window and a Dock icon, as an "App audio (<app>)" input (uid app:<bundle id>)
+enum RunningApps {
+    static func devices(keeping saved: String?) -> [Device] {
+        var seen: Set<String> = ["com.google.Chrome", "org.mozilla.firefox"]
+        if let me = Bundle.main.bundleIdentifier { seen.insert(me) }
+        var out: [Device] = []
+        for a in NSWorkspace.shared.runningApplications where a.activationPolicy == .regular {
+            guard let b = a.bundleIdentifier, !seen.contains(b) else { continue }
+            seen.insert(b)
+            out.append(Device(id: 0, name: "App audio (\(a.localizedName ?? b))", uid: "app:" + b, inputs: 2, outputs: 0))
+        }
+        out.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        // a saved choice that is not running now stays in the menu (so the picker still shows it)
+        if let s = saved, s.hasPrefix("app:"), !seen.contains(String(s.dropFirst(4))) {
+            out.insert(Device(id: 0, name: "App audio (\(s.dropFirst(4)), not running)", uid: s, inputs: 2, outputs: 0), at: 0)
+        }
+        return out
+    }
+}
+
 enum Permissions {
     /// what this run needs: Screen Recording for the Firefox capture, the Microphone for a real input device
     static var needed: [String] {
-        (UserDefaults.standard.string(forKey: "input") ?? "").hasPrefix("app:") ? ["Screen Recording"] : ["Microphone"]
+        let inp = UserDefaults.standard.string(forKey: "input") ?? ""
+        if inp.hasPrefix("app:") { return ProcTap.preferred(String(inp.dropFirst(4))) ? [] : ["Screen Recording"] }   // the process tap asks for System Audio Recording by itself
+        return ["Microphone"]
+    }
+    /// v18: the system's own microphone question at start (once, while undetermined), the input opens the moment it is granted
+    static func askAtStart() {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined,
+              !(UserDefaults.standard.string(forKey: "input") ?? "").hasPrefix("app:") else { return }
+        open("Microphone")
     }
     static func allowed(_ p: String) -> Bool {
         switch p {
@@ -1197,7 +1266,7 @@ enum Permissions {
     static func openMissing() { if let p = missing.first { open(p) } }
     static func open(_ p: String) {
         if p == "Microphone", AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
-            AVCaptureDevice.requestAccess(for: .audio) { _ in }      // the system's own question, once
+            AVCaptureDevice.requestAccess(for: .audio) { _ in DispatchQueue.main.async { REC.permissionsChanged() } }      // the system's own question, once
             return
         }
         let pane = p == "Screen Recording" ? "ScreenCapture" : p

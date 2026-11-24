@@ -12,6 +12,13 @@ final class ProcTap: AppSource {
     /// the apps that need it (their sound comes from helper processes)
     static func wanted(_ bundle: String) -> Bool { bundle.hasPrefix("com.google.Chrome") || bundle.hasPrefix("com.microsoft.edgemac") || bundle.hasPrefix("com.brave.Browser") }
 
+    /// v18: any app whose sound CoreAudio already sees (a process object) goes through the tap; Firefox keeps ScreenCaptureKit (as before)
+    static func preferred(_ bundle: String) -> Bool {
+        if wanted(bundle) { return true }
+        if bundle == "org.mozilla.firefox" { return false }
+        return !processes(bundle).isEmpty
+    }
+
     private let sink: (UnsafePointer<Float>, UnsafePointer<Float>, Int) -> Void
     private(set) var running = false
     private(set) var rate: Double = 48000
